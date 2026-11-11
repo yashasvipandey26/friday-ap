@@ -542,7 +542,7 @@ async function showOrders() {
 api("/api/health").then((health) => {
   const status = document.getElementById("ai-status");
   status.textContent = health.ai_ready ? "AI reader ready" : "AI reader is not set up";
-  status.title = health.ai_ready ? `Reading with ${health.model}` : "Set ANTHROPIC_API_KEY on the server and restart.";
+  status.title = health.ai_ready ? `Reading with ${health.model}` : `Set ${health.key_name} on the server and restart.`;
   status.classList.add(health.ai_ready ? "is-ready" : "is-missing");
 }).catch(() => {});
 

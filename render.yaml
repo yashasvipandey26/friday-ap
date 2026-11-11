@@ -10,5 +10,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      # Render asks for these values; they are never stored in the repository. Fill in one key.
       - key: ANTHROPIC_API_KEY
-        sync: false   # Render asks for the value; it is never stored in the repository
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: FRIDAY_AI_PROVIDER   # anthropic or gemini; empty picks whichever has a key
+        sync: false
+      - key: FRIDAY_MODEL         # empty uses the provider's default model
+        sync: false

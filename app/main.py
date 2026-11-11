@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .ai import Explainer, InvoiceReader, build_ai
+from .ai import API_KEY_NAMES, Explainer, InvoiceReader, build_ai
 from .config import Settings, load_settings
 from .pipeline import InvoicePipeline, ResolutionError, resolve_review
 from .rules import mask_account
@@ -56,7 +56,7 @@ def create_app(
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     default_reader, default_explainer = build_ai(
-        settings.anthropic_api_key, settings.model, settings.company_name, settings.read_effort)
+        settings.provider, settings.api_key, settings.model, settings.company_name, settings.read_effort)
     pipeline = InvoicePipeline(store, reader or default_reader, explainer or default_explainer, settings)
     samples = {sample["id"]: sample for sample in json.loads((settings.samples_dir / "manifest.json").read_text())}
 
@@ -65,7 +65,9 @@ def create_app(
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {
-            "ai_ready": reader is not None or settings.anthropic_api_key is not None,
+            "ai_ready": reader is not None or settings.api_key is not None,
+            "provider": settings.provider,
+            "key_name": API_KEY_NAMES[settings.provider],
             "model": settings.model,
             "company": settings.company_name,
             "tolerance_pct": settings.policy.tolerance_pct,

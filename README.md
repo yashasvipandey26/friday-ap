@@ -16,16 +16,21 @@ traced to a rule.
 
 ## Run it on your machine
 
-You need Python 3.11 or newer and an Anthropic API key.
+You need Python 3.11 or newer and an API key for either Anthropic (Claude) or Google (Gemini).
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # then paste your key after ANTHROPIC_API_KEY=
+cp .env.example .env          # then paste your key after ANTHROPIC_API_KEY= or GOOGLE_API_KEY=
 uvicorn app.main:create_app --factory --reload --env-file .env
 ```
 
-Open <http://localhost:8000>. The header shows "AI reader ready" when the key has been picked up.
+Open <http://localhost:8000>. The header shows "AI reader ready" when the key has been picked up;
+hover over it to see which model is reading.
+
+To use Gemini, put a Google AI Studio key in `GOOGLE_API_KEY`. If that is the only key set, Gemini
+is picked automatically; set `FRIDAY_AI_PROVIDER=gemini` to be explicit. `FRIDAY_MODEL` chooses the
+model for either provider.
 
 ## What the five sample invoices should do
 
@@ -65,7 +70,8 @@ Render is the quickest route.
    reads `render.yaml`.)
 3. Build command `pip install -r requirements.txt`, start command
    `uvicorn app.main:create_app --factory --host 0.0.0.0 --port $PORT`.
-4. Add the environment variable `ANTHROPIC_API_KEY`.
+4. Add the environment variable `ANTHROPIC_API_KEY`, or `GOOGLE_API_KEY` (plus `FRIDAY_AI_PROVIDER=gemini`
+   if you want to be explicit).
 
 Two things to know about Render's free plan:
 
@@ -87,7 +93,7 @@ app/
   domain.py     what an invoice, a finding and a decision look like (read this first)
   rules.py      every check and the final decision; pure functions, no AI, no database
   pipeline.py   runs the stages in order and records each one as it happens
-  ai.py         the two Claude calls: read the document, write up the decision
+  ai.py         the two AI calls (read the document, write up the decision), on Claude or Gemini
   store.py      SQLite: vendors, purchase orders, recorded invoices, run history
   main.py       the web endpoints
   config.py     settings read from the environment
@@ -100,12 +106,14 @@ tests/                  scenario tests, rule tests, API tests
 
 ## Settings
 
-All optional except the key. See `.env.example`.
+All optional except one API key. See `.env.example`.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | none | Needed to read invoices |
-| `FRIDAY_MODEL` | `claude-sonnet-5-5` | Model used for reading and writing |
+| `FRIDAY_AI_PROVIDER` | whichever has a key | `anthropic` or `gemini` |
+| `ANTHROPIC_API_KEY` | none | Needed to read invoices with Claude |
+| `GOOGLE_API_KEY` | none | Needed to read invoices with Gemini (`GEMINI_API_KEY` also works) |
+| `FRIDAY_MODEL` | `claude-sonnet-5-5` or `gemini-3.8-flash` | Model used for reading and writing |
 | `FRIDAY_READ_EFFORT` | `medium` | How hard the model thinks while reading: `low`, `medium`, `high` |
 | `FRIDAY_TOLERANCE_PCT` | `2.0` | How far over a PO's balance an invoice may go, as % of the PO |
 | `FRIDAY_COMPANY_NAME` | `Meridian Retail` | Signs the draft messages |

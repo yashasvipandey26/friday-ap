@@ -27,13 +27,13 @@ whether AI or rules did the work.
 | # | Stage | Done by | What happens | Code |
 |---|---|---|---|---|
 | 1 | Receive the file | System | Checks the file opens, counts pages, and works out whether it is a digital PDF or a scan with no text layer | `pipeline._receive` |
-| 2 | Read the invoice | AI | Sends the file to Claude and gets back vendor, numbers, dates, amounts, bank details, plus what it was unsure of | `ai.ClaudeInvoiceReader` |
+| 2 | Read the invoice | AI | Sends the file to the model (Claude or Gemini) and gets back vendor, numbers, dates, amounts, bank details, plus what it was unsure of | `ai.AiInvoiceReader` |
 | 3 | Check it is complete and adds up | Rules | Required fields present; line items, tax and total reconcile; date is sane | `rules.validate_invoice` |
 | 4 | Identify the vendor | Rules | Matches the vendor by tax ID, then by name; compares bank details with the vendor record | `rules.identify_vendor` |
 | 5 | Look for duplicates | Rules | Same invoice number after normalising; same invoice already waiting for review; same amount on the same date | `rules.find_duplicates` |
 | 6 | Find the purchase order | Rules | Uses the PO number if one is printed; otherwise scores the vendor's open POs and suggests the best | `rules.match_purchase_order` |
 | 7 | Compare amounts with the PO | Rules | Brings the invoice to a before-tax figure and compares it with what is left on the PO | `rules.compare_amounts` |
-| 8 | Decide and explain | Rules, then AI | Any reject wins, otherwise any review wins, otherwise approve. Then the write-up and any draft message | `rules.decide`, `ai.ClaudeExplainer` |
+| 8 | Decide and explain | Rules, then AI | Any reject wins, otherwise any review wins, otherwise approve. Then the write-up and any draft message | `rules.decide`, `ai.AiExplainer` |
 
 Each check produces a *finding*: a pass, a note, a review or a reject, with a sentence a person can
 read. The decision is the worst finding. Nothing else can approve an invoice.
@@ -71,13 +71,20 @@ vendor or a note to the PO owner. For a changed bank account it deliberately dra
 tells the reviewer to phone the number in the vendor master. If the invoice is fraudulent, replying
 to it reaches the fraudster.
 
-**The file itself goes to the model.** Claude accepts PDFs directly and reads them as text and
-image together, so a clean PDF and a scan take the same path. There is no OCR step to maintain and
+**The file itself goes to the model.** Claude and Gemini both accept PDFs directly and read them as
+text and image together, so a clean PDF and a scan take the same path. There is no OCR step to maintain and
 no branch that only scans exercise.
 
 **Structured output, not free text.** The reader is given a JSON schema and the API guarantees the
 reply matches it. The current Claude models reject forced tool calls and the `temperature` setting,
 so structured output is the supported way to get a fixed shape back.
+
+**The provider is a setting, not a dependency.** Claude and Gemini sit behind the same small
+interface (`ai.JsonModel`): instructions, an optional file, a prompt and a schema in, JSON out. Both
+use the same schema and the same instructions. `FRIDAY_AI_PROVIDER` and `FRIDAY_MODEL` in `.env`
+choose which one runs. Since only the reading changes between providers and the rules don't, the
+decisions differ only if the two models read an invoice differently, and the "See everything that
+was read" panel shows exactly that.
 
 **Everything from the invoice is treated as data.** The reader's instructions say to ignore any
 instructions inside the document, and even if a document did trick the model, the model has no way

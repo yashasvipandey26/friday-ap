@@ -5,6 +5,10 @@
 
 Neither can change the outcome. Both sit behind small interfaces so they can be replaced
 (another model, another vendor, a stub in tests) without touching the rest of the process.
+
+Two providers are supported, Anthropic (Claude) and Google (Gemini). Each is a `JsonModel`: one call
+that sends instructions, an optional document and a prompt, and must come back as JSON matching a
+schema. The reader and the writer do not know which provider they are talking to.
 """
 from __future__ import annotations
 
@@ -15,6 +19,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import anthropic
+import httpx
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 from pydantic import ValidationError
 
 from .domain import Decision, DraftMessage, ExtractedInvoice, Explanation
@@ -41,6 +49,13 @@ class InvoiceReader(Protocol):
 
 class Explainer(Protocol):
     def explain(self, invoice: ExtractedInvoice | None, decision: Decision) -> Explanation: ...
+
+
+class JsonModel(Protocol):
+    """One model call whose reply must be JSON matching `schema`, or a ReaderError."""
+
+    def ask(self, *, instructions: str, prompt: str, schema: dict[str, Any], effort: str,
+            document: Document | None = None) -> dict[str, Any]: ...
 
 
 # --------------------------------------------------------------------------- reading
@@ -111,19 +126,17 @@ _INVOICE_SCHEMA: dict[str, Any] = {
 _INVOICE_SCHEMA["required"] = list(_INVOICE_SCHEMA["properties"])
 
 
-class ClaudeInvoiceReader:
-    """Sends the file itself to Claude, so clean PDFs and scans go down the same path with no OCR step."""
+class AiInvoiceReader:
+    """Sends the file itself to the model, so clean PDFs and scans go down the same path with no OCR step."""
 
-    def __init__(self, client: anthropic.Anthropic, model: str, effort: str = "medium") -> None:
-        self._client = client
+    def __init__(self, model: JsonModel, effort: str = "medium") -> None:
         self._model = model
         self._effort = effort  # how hard the model thinks: low is faster, high is more careful
 
     def read(self, document: Document) -> ExtractedInvoice:
-        reply = _ask_for_json(
-            self._client, self._model, effort=self._effort, schema=_INVOICE_SCHEMA,
-            instructions=_READER_INSTRUCTIONS,
-            content=[_as_content_block(document), {"type": "text", "text": "Read this invoice."}],
+        reply = self._model.ask(
+            instructions=_READER_INSTRUCTIONS, prompt="Read this invoice.", schema=_INVOICE_SCHEMA,
+            effort=self._effort, document=document,
         )
         try:
             return ExtractedInvoice.model_validate(reply)
@@ -134,14 +147,11 @@ class ClaudeInvoiceReader:
 class UnconfiguredReader:
     """Stands in when no API key is set, so the app still starts and says what is missing."""
 
+    def __init__(self, key_name: str = "ANTHROPIC_API_KEY") -> None:
+        self._key_name = key_name
+
     def read(self, document: Document) -> ExtractedInvoice:
-        raise ReaderError("No AI reader is set up. Add ANTHROPIC_API_KEY to the environment and restart.")
-
-
-def _as_content_block(document: Document) -> dict[str, Any]:
-    block_type = "document" if document.media_type == "application/pdf" else "image"
-    encoded = base64.standard_b64encode(document.data).decode("ascii")
-    return {"type": block_type, "source": {"type": "base64", "media_type": document.media_type, "data": encoded}}
+        raise ReaderError(f"No AI reader is set up. Add {self._key_name} to the environment and restart.")
 
 
 # --------------------------------------------------------------------------- writing
@@ -200,11 +210,10 @@ class TemplateExplainer:
                             body=f"{body}\n\nAccounts Payable, {self._company_name}")
 
 
-class ClaudeExplainer:
-    """Asks Claude for the wording; falls back to the template so a write-up is never missing."""
+class AiExplainer:
+    """Asks the model for the wording; falls back to the template so a write-up is never missing."""
 
-    def __init__(self, client: anthropic.Anthropic, model: str, company_name: str) -> None:
-        self._client = client
+    def __init__(self, model: JsonModel, company_name: str) -> None:
         self._model = model
         self._instructions = _WRITER_INSTRUCTIONS.replace("{company}", company_name)
         self._fallback = TemplateExplainer(company_name)
@@ -220,10 +229,9 @@ class ClaudeExplainer:
             "invoice": invoice.model_dump(exclude={"uncertain_fields", "document_quality"}) if invoice else None,
         }
         try:
-            reply = _ask_for_json(
-                self._client, self._model, effort="low", schema=_WRITE_UP_SCHEMA,
-                instructions=self._instructions,
-                content=[{"type": "text", "text": "Facts:\n" + json.dumps(facts, indent=2, ensure_ascii=False)}],
+            reply = self._model.ask(
+                instructions=self._instructions, schema=_WRITE_UP_SCHEMA, effort="low",
+                prompt="Facts:\n" + json.dumps(facts, indent=2, ensure_ascii=False),
             )
         except ReaderError as error:
             logger.warning("AI write-up failed, using the template instead: %s", error)
@@ -236,39 +244,106 @@ class ClaudeExplainer:
         return Explanation(summary=reply["summary"].strip(), message=message, written_by="ai")
 
 
-# --------------------------------------------------------------------------- shared API call
+# --------------------------------------------------------------------------- the providers
+
+API_KEY_NAMES = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GOOGLE_API_KEY"}
 
 
-def _ask_for_json(
-    client: anthropic.Anthropic, model: str, *, effort: str, schema: dict[str, Any],
-    instructions: str, content: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """One Claude call that must come back as JSON matching the schema, or raise ReaderError."""
-    try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=8000,  # shared between the model's thinking and its reply
-            system=instructions,
-            messages=[{"role": "user", "content": content}],
-            output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
+class ClaudeModel:
+    """Anthropic. Structured output is requested with `output_config`; the current Claude models
+    reject forced tool calls and `temperature`, so this is the supported way to get a fixed shape."""
+
+    def __init__(self, client: anthropic.Anthropic, model: str) -> None:
+        self._client = client
+        self._model = model
+
+    def ask(self, *, instructions: str, prompt: str, schema: dict[str, Any], effort: str,
+            document: Document | None = None) -> dict[str, Any]:
+        content: list[dict[str, Any]] = [_as_claude_block(document)] if document else []
+        content.append({"type": "text", "text": prompt})
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=8000,  # shared between the model's thinking and its reply
+                system=instructions,
+                messages=[{"role": "user", "content": content}],
+                output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
+            )
+        except anthropic.AuthenticationError as error:
+            raise ReaderError("The AI service rejected the API key. Check ANTHROPIC_API_KEY.") from error
+        except anthropic.RateLimitError as error:
+            raise ReaderError("The AI service is rate-limiting requests. Try again in a minute.") from error
+        except anthropic.APIConnectionError as error:
+            raise ReaderError("Couldn't reach the AI service. Check the network connection.") from error
+        except anthropic.APIStatusError as error:
+            raise ReaderError(f"The AI service returned an error ({error.status_code}): {error.message}") from error
+        except anthropic.APIError as error:
+            raise ReaderError(f"The AI service call failed: {error}") from error
+
+        if response.stop_reason == "refusal":
+            raise ReaderError("The AI service declined to process this document.")
+        if response.stop_reason == "max_tokens":
+            raise ReaderError("The document was too long to read in one pass.")
+        return _parse_json(next((block.text for block in response.content if block.type == "text"), None))
+
+
+def _as_claude_block(document: Document) -> dict[str, Any]:
+    block_type = "document" if document.media_type == "application/pdf" else "image"
+    encoded = base64.standard_b64encode(document.data).decode("ascii")
+    return {"type": block_type, "source": {"type": "base64", "media_type": document.media_type, "data": encoded}}
+
+
+# Gemini says why it stopped; anything other than these means the answer is missing or cut off.
+_GEMINI_BLOCKED = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "LANGUAGE"}
+
+
+class GeminiModel:
+    """Google. The file goes in as raw bytes next to the prompt, and `response_json_schema` makes
+    the reply match the same JSON schema the Claude path uses."""
+
+    def __init__(self, client: genai.Client, model: str) -> None:
+        self._client = client
+        self._model = model
+
+    def ask(self, *, instructions: str, prompt: str, schema: dict[str, Any], effort: str,
+            document: Document | None = None) -> dict[str, Any]:
+        contents: list[Any] = [genai_types.Part.from_bytes(data=document.data, mime_type=document.media_type)] if document else []
+        contents.append(prompt)
+        config = genai_types.GenerateContentConfig(
+            system_instruction=instructions,
+            max_output_tokens=16000,  # shared between the model's thinking and its reply
+            response_mime_type="application/json",
+            response_json_schema=schema,
+            thinking_config=genai_types.ThinkingConfig(thinking_level=effort),
         )
-    except anthropic.AuthenticationError as error:
-        raise ReaderError("The AI service rejected the API key. Check ANTHROPIC_API_KEY.") from error
-    except anthropic.RateLimitError as error:
-        raise ReaderError("The AI service is rate-limiting requests. Try again in a minute.") from error
-    except anthropic.APIConnectionError as error:
-        raise ReaderError("Couldn't reach the AI service. Check the network connection.") from error
-    except anthropic.APIStatusError as error:
-        raise ReaderError(f"The AI service returned an error ({error.status_code}): {error.message}") from error
-    except anthropic.APIError as error:
-        raise ReaderError(f"The AI service call failed: {error}") from error
+        try:
+            response = self._client.models.generate_content(model=self._model, contents=contents, config=config)
+        except genai_errors.ClientError as error:
+            if error.code in (401, 403) or "API_KEY" in str(error.details):
+                raise ReaderError("The AI service rejected the API key. Check GOOGLE_API_KEY.") from error
+            if error.code == 429:
+                raise ReaderError("The AI service is rate-limiting requests. Try again in a minute.") from error
+            if error.code == 404:
+                raise ReaderError(f"The model “{self._model}” wasn't found. Check FRIDAY_MODEL.") from error
+            raise ReaderError(f"The AI service returned an error ({error.code}): {error.message}") from error
+        except genai_errors.APIError as error:
+            raise ReaderError(f"The AI service returned an error ({error.code}): {error.message}") from error
+        except httpx.HTTPError as error:
+            raise ReaderError("Couldn't reach the AI service. Check the network connection.") from error
 
-    if response.stop_reason == "refusal":
-        raise ReaderError("The AI service declined to process this document.")
-    if response.stop_reason == "max_tokens":
-        raise ReaderError("The document was too long to read in one pass.")
+        if response.prompt_feedback and response.prompt_feedback.block_reason:
+            raise ReaderError("The AI service declined to process this document.")
+        candidate = response.candidates[0] if response.candidates else None
+        finish = candidate.finish_reason.name if candidate and candidate.finish_reason else None
+        if finish in _GEMINI_BLOCKED:
+            raise ReaderError("The AI service declined to process this document.")
+        if finish == "MAX_TOKENS":
+            raise ReaderError("The document was too long to read in one pass.")
+        parts = candidate.content.parts if candidate and candidate.content and candidate.content.parts else []
+        return _parse_json("".join(part.text for part in parts if part.text and not part.thought) or None)
 
-    text = next((block.text for block in response.content if block.type == "text"), None)
+
+def _parse_json(text: str | None) -> dict[str, Any]:
     if not text:
         raise ReaderError("The AI service returned an empty answer.")
     try:
@@ -277,9 +352,16 @@ def _ask_for_json(
         raise ReaderError("The AI service returned something that wasn't valid JSON.") from error
 
 
-def build_ai(api_key: str | None, model: str, company_name: str, read_effort: str = "medium") -> tuple[InvoiceReader, Explainer]:
-    """Wire up the real AI when a key is present; otherwise components that explain what is missing."""
+def build_ai(provider: str, api_key: str | None, model: str, company_name: str,
+             read_effort: str = "medium") -> tuple[InvoiceReader, Explainer]:
+    """Wire up the chosen provider when its key is present; otherwise components that explain what is missing."""
+    key_name = API_KEY_NAMES[provider]
     if not api_key:
-        return UnconfiguredReader(), TemplateExplainer(company_name)
-    client = anthropic.Anthropic(api_key=api_key, max_retries=3, timeout=120.0)
-    return ClaudeInvoiceReader(client, model, read_effort), ClaudeExplainer(client, model, company_name)
+        return UnconfiguredReader(key_name), TemplateExplainer(company_name)
+    if provider == "gemini":
+        client = genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(
+            timeout=120_000, retry_options=genai_types.HttpRetryOptions(attempts=3)))  # timeout is in ms
+        json_model: JsonModel = GeminiModel(client, model)
+    else:
+        json_model = ClaudeModel(anthropic.Anthropic(api_key=api_key, max_retries=3, timeout=120.0), model)
+    return AiInvoiceReader(json_model, read_effort), AiExplainer(json_model, company_name)
