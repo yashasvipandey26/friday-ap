@@ -1,0 +1,37 @@
+[
+  {
+    "id": "kaveri-furniture",
+    "file": "01-kaveri-chairs-and-desks.pdf",
+    "sender": "Kaveri Office Supplies",
+    "subject": "Invoice for the chairs and desks delivered last week",
+    "preview": "Please find attached our tax invoice against your PO-2026-0412. Kindly process at the earliest."
+  },
+  {
+    "id": "northwind-freight",
+    "file": "02-northwind-october-freight.pdf",
+    "sender": "Northwind Logistics",
+    "subject": "October freight invoice, and please note our new bank details",
+    "preview": "Attaching the invoice for the October lanes. We have changed banks, so please use the new account."
+  },
+  {
+    "id": "brightpath-milestone",
+    "file": "03-brightpath-final-milestone.pdf",
+    "sender": "Brightpath IT Services",
+    "subject": "ERP integration: final milestone invoice",
+    "preview": "Go-live is complete. Invoice for milestone 3 attached, including the two change requests."
+  },
+  {
+    "id": "sahyadri-brochures",
+    "file": "04-sahyadri-brochures-scan.pdf",
+    "sender": "Sahyadri Print Works",
+    "subject": "Bill for brochures (scan attached)",
+    "preview": "Sir, brochures were delivered on Friday. Sending a scan of the bill, original is with the driver."
+  },
+  {
+    "id": "kaveri-reminder",
+    "file": "05-kaveri-payment-reminder.pdf",
+    "sender": "Kaveri Office Supplies",
+    "subject": "Reminder: is this invoice still pending?",
+    "preview": "Our records show this October invoice as unpaid. Resending a copy for your reference."
+  }
+]

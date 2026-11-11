@@ -1,0 +1,9 @@
+-r requirements.txt
+# tests
+pytest==9.2.0
+httpx==0.28.1
+# only needed to regenerate the sample invoices (scripts/make_samples.py)
+reportlab>=4.0
+pymupdf>=1.24
+pillow>=10.0
+numpy>=1.26

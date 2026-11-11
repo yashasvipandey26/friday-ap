@@ -1,0 +1,6 @@
+fastapi==0.162.2
+uvicorn[standard]==0.54.0
+python-multipart==0.0.33
+pydantic==2.14.3
+pypdf==5.9.0
+anthropic==2.7.0

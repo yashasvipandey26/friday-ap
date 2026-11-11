@@ -1,0 +1,158 @@
+{
+  "vendors": [
+    {
+      "id": "V-KAVERI",
+      "name": "Kaveri Office Supplies Pvt Ltd",
+      "tax_id": "29AAKCK4821M1Z7",
+      "bank_name": "HDFC Bank",
+      "bank_account": "50200048214821",
+      "bank_ifsc": "HDFC0001234",
+      "phone": "+91 80 5550 0142",
+      "email": "accounts@kaverioffice.example"
+    },
+    {
+      "id": "V-NORTHWIND",
+      "name": "Northwind Logistics LLP",
+      "tax_id": "06AAHFN7302P1Z3",
+      "bank_name": "Axis Bank",
+      "bank_account": "918020073305512",
+      "bank_ifsc": "UTIB0000456",
+      "phone": "+91 124 5550 0178",
+      "email": "billing@northwindlogistics.example"
+    },
+    {
+      "id": "V-BRIGHTPATH",
+      "name": "Brightpath IT Services Pvt Ltd",
+      "tax_id": "27AAGCB5519R1Z9",
+      "bank_name": "ICICI Bank",
+      "bank_account": "000405118842",
+      "bank_ifsc": "ICIC0000004",
+      "phone": "+91 20 5550 0163",
+      "email": "finance@brightpath.example"
+    },
+    {
+      "id": "V-SAHYADRI",
+      "name": "Sahyadri Print Works",
+      "tax_id": "27ABXFS6640K1Z2",
+      "bank_name": "Bank of Maharashtra",
+      "bank_account": "60284417755",
+      "bank_ifsc": "MAHB0000321",
+      "phone": "+91 20 5550 0119",
+      "email": "sahyadriprint@mail.example"
+    }
+  ],
+  "purchase_orders": [
+    {
+      "po_number": "PO-2026-0379",
+      "vendor_id": "V-KAVERI",
+      "description": "Stationery and pantry consumables, October",
+      "currency": "INR",
+      "amount": 55000,
+      "tax_rate_percent": 18,
+      "status": "closed",
+      "order_date": "2026-09-25",
+      "lines": [
+        {"description": "Stationery and pantry consumables for October, as per list", "quantity": 1, "unit_price": 55000, "amount": 55000}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0388",
+      "vendor_id": "V-BRIGHTPATH",
+      "description": "ERP integration, three milestones",
+      "currency": "INR",
+      "amount": 900000,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-07-20",
+      "lines": [
+        {"description": "Milestone 1: discovery and solution design", "quantity": 1, "unit_price": 300000, "amount": 300000},
+        {"description": "Milestone 2: build and integration", "quantity": 1, "unit_price": 360000, "amount": 360000},
+        {"description": "Milestone 3: UAT and go-live support", "quantity": 1, "unit_price": 240000, "amount": 240000}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0412",
+      "vendor_id": "V-KAVERI",
+      "description": "Office chairs and height-adjustable desks",
+      "currency": "INR",
+      "amount": 240000,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-10-12",
+      "lines": [
+        {"description": "Ergonomic office chair, mesh back", "quantity": 40, "unit_price": 4500, "amount": 180000},
+        {"description": "Height-adjustable desk, 1500 mm", "quantity": 6, "unit_price": 10000, "amount": 60000}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0417",
+      "vendor_id": "V-SAHYADRI",
+      "description": "Visiting cards and letterheads",
+      "currency": "INR",
+      "amount": 34500,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-10-08",
+      "lines": [
+        {"description": "Visiting cards, 300 gsm matt, 20 sets of 200", "quantity": 20, "unit_price": 650, "amount": 13000},
+        {"description": "Letterheads, 100 gsm bond, A4", "quantity": 2000, "unit_price": 10.75, "amount": 21500}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0431",
+      "vendor_id": "V-NORTHWIND",
+      "description": "Inbound freight, Delhi NCR to Bengaluru, October",
+      "currency": "INR",
+      "amount": 150000,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-10-01",
+      "lines": [
+        {"description": "Full truck load, 32 ft container, Gurugram to Bengaluru", "quantity": 5, "unit_price": 28000, "amount": 140000},
+        {"description": "Loading and unloading charges", "quantity": 1, "unit_price": 10000, "amount": 10000}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0440",
+      "vendor_id": "V-SAHYADRI",
+      "description": "A4 tri-fold brochures, 5,000 nos, 130 gsm art paper",
+      "currency": "INR",
+      "amount": 86000,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-10-21",
+      "lines": [
+        {"description": "A4 tri-fold brochure, 130 gsm art paper, four colour printing", "quantity": 5000, "unit_price": 17.2, "amount": 86000}
+      ]
+    }
+  ],
+  "ledger": [
+    {
+      "vendor_id": "V-BRIGHTPATH",
+      "invoice_number": "BIT/2026/117",
+      "invoice_date": "2026-08-12",
+      "pre_tax": 300000,
+      "total": 354000,
+      "po_number": "PO-2026-0388",
+      "posted_at": "2026-08-14T10:12:00+00:00"
+    },
+    {
+      "vendor_id": "V-BRIGHTPATH",
+      "invoice_number": "BIT/2026/141",
+      "invoice_date": "2026-09-28",
+      "pre_tax": 360000,
+      "total": 424800,
+      "po_number": "PO-2026-0388",
+      "posted_at": "2026-09-30T09:40:00+00:00"
+    },
+    {
+      "vendor_id": "V-KAVERI",
+      "invoice_number": "KOS/26-27/0874",
+      "invoice_date": "2026-10-03",
+      "pre_tax": 55000,
+      "total": 64900,
+      "po_number": "PO-2026-0379",
+      "posted_at": "2026-10-06T11:05:00+00:00"
+    }
+  ]
+}

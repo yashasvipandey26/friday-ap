@@ -1,0 +1,14 @@
+# Render blueprint: "New > Blueprint" in the Render dashboard, pointed at this repository.
+services:
+  - type: web
+    name: friday-ap
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:create_app --factory --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: ANTHROPIC_API_KEY
+        sync: false   # Render asks for the value; it is never stored in the repository

@@ -1,0 +1,29 @@
+.env
+var/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Local database and runtime data
+var/
+*.db
+*.sqlite
+*.sqlite3
+
+# Editor/system
+.vscode/
+.DS_Store
+
