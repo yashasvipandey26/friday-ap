@@ -5,3 +5,4 @@ pydantic==2.14.3
 pypdf==5.9.0
 anthropic==2.7.0
 google-genai==3.1.0
+httpx==0.28.1
