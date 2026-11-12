@@ -1,6 +1,8 @@
 """The small pieces the decisions rest on."""
+from datetime import date
+
 from app.domain import ExtractedInvoice, reference_key
-from app.rules import format_money, mask_account, pre_tax_amount
+from app.rules import Policy, format_money, mask_account, pre_tax_amount, validate_invoice
 
 
 def test_reference_key_ignores_punctuation_case_and_leading_zeros():
@@ -36,3 +38,26 @@ def test_reader_output_is_cleaned_up_on_the_way_in():
     assert invoice.total == 283200
     assert invoice.tax_treatment == "separate"
     assert invoice.line_items[0].amount == 1180
+
+
+def _arithmetic(**fields) -> str:
+    invoice = ExtractedInvoice(vendor_name="Rentomojo Limited", invoice_number="R27/Jun18157627",
+                               invoice_date="2026-06-30", tax_treatment="separate", **fields)
+    findings = validate_invoice(invoice, date(2026, 7, 5), Policy())
+    return next(finding.code for finding in findings if finding.code.startswith("MATH"))
+
+
+def test_line_items_printed_with_their_tax_added_still_add_up():
+    # The line's last column is "Net Payable" (taxable value plus CGST and SGST), as on many GST invoices.
+    assert _arithmetic(line_items=[{"description": "Water purifier rent", "amount": 228.80}],
+                       subtotal=193.90, tax_amount=34.90, total=228.80) == "MATH_OK"
+
+
+def test_lines_matching_the_total_do_not_hide_a_wrong_subtotal():
+    assert _arithmetic(line_items=[{"description": "Water purifier rent", "amount": 228.80}],
+                       subtotal=150.00, tax_amount=34.90, total=228.80) == "MATH_MISMATCH"
+
+
+def test_lines_that_match_neither_subtotal_nor_total_are_flagged():
+    assert _arithmetic(line_items=[{"description": "Water purifier rent", "amount": 210.00}],
+                       subtotal=193.90, tax_amount=34.90, total=228.80) == "MATH_MISMATCH"

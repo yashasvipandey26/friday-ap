@@ -173,7 +173,11 @@ def _check_arithmetic(invoice: ExtractedInvoice, policy: Policy) -> Finding:
                     f"the line items add up to {money(line_total)} but the total says {money(invoice.total)}")
     else:
         if line_total is not None and invoice.subtotal is not None:
-            compare(line_total, invoice.subtotal,
+            # Many GST invoices print each line with its own tax added, so the lines add up to the total
+            # rather than the subtotal. That is consistent too, as long as subtotal plus tax still equals
+            # the total, which the next check confirms.
+            lines_include_tax = invoice.total is not None and abs(line_total - invoice.total) <= policy.rounding
+            compare(line_total, invoice.total if lines_include_tax else invoice.subtotal,
                     f"the line items add up to {money(line_total)} but the subtotal says {money(invoice.subtotal)}")
         if None not in (invoice.subtotal, invoice.tax_amount, invoice.total):
             compare(invoice.subtotal + invoice.tax_amount, invoice.total,
