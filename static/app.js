@@ -152,19 +152,19 @@ async function showInbox(view) {
 
   const mailbox = el("section", { class: "mailbox", "aria-live": "polite" });
   view.replaceChildren(
+    el("header", { class: "page-head" },
+      el("h1", {}, "Inbox"),
+      el("p", {}, "Invoices arrive by email or upload, and are checked against vendors, purchase orders and earlier invoices.")),
     el("div", { class: "intake" },
-      el("section", { class: "intake-lede" },
-        el("h1", {}, "Email an invoice in, or drop one here, and watch every check happen."),
-        el("p", {}, "Matchbook reads the document, checks it against the approved vendors and open purchase orders, " +
-          "and decides whether to pay it. Each step is shown as it runs, the reason comes in plain English, " +
-          "and whoever needs to know is emailed."),
+      el("section", {},
+        el("h2", { class: "section-title" }, "Email"),
         mailbox,
+        el("h2", { class: "section-title" }, "Upload"),
         dropzone),
       el("section", { class: "inbox" },
-        el("h2", {}, "Or open one from this morning's sample inbox"),
+        el("h2", { class: "section-title" }, "Sample invoices"),
         el("ul", { class: "mail-list" }, mails),
-        el("p", { class: "fine-print" }, "Five vendor emails with invoices attached. Each one goes through exactly the same " +
-          "process as a real email or a file you upload."))));
+        el("p", { class: "fine-print" }, "Demo emails with invoices attached. They go through the same checks as real ones."))));
 
   const drawMailbox = async () => mailbox.replaceChildren(...mailboxNodes(await api("/api/mailbox")));
   await drawMailbox().catch((error) => mailbox.replaceChildren(el("p", { class: "mailbox-error" }, error.message)));
@@ -335,7 +335,7 @@ function paintRun(run, frame, { revealed, live, finished = true }) {
       retryNode(run)));
     return;
   }
-  frame.verdict.append(decisionCard(run, live, frame));
+  frame.verdict.append(decisionCard(run, frame));
   if (live) frame.verdict.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -418,15 +418,14 @@ function candidatesNode(candidates) {
     el("p", { class: "fine-print" }, "Score is 60% amount fit and 40% wording fit. A suggestion needs at least 75% and a clear lead."));
 }
 
-function decisionCard(run, live, frame) {
+function decisionCard(run, frame) {
   const { decision, explanation } = run;
   const outcome = OUTCOMES[decision.outcome];
   const others = decision.issues.slice(1);
   const showWriteUp = explanation && explanation.summary !== decision.reason;
 
   return el("section", { class: `decision tone-${outcome.tone}` },
-    el("p", { class: `stamp${live ? " is-fresh" : ""}`, "aria-hidden": "true" },
-      outcome.stamp, el("small", {}, day(run.finished_at || run.created_at))),
+    el("span", { class: "badge" }, outcome.label),
     el("h2", {}, decision.headline),
     el("p", { class: "decision-reason" }, decision.reason),
     el("h3", {}, "What happens next"),
@@ -590,11 +589,11 @@ async function showRuns(view) {
   const share = stats.processed ? percent(stats.approved_untouched / stats.processed) : "0%";
   const figures = [
     [stats.processed, "invoices processed"],
-    [`${stats.approved_untouched} (${share})`, "approved with no one touching them"],
+    [`${stats.approved_untouched} (${share})`, "approved automatically"],
     [stats.waiting_for_person, "waiting for a person"],
     [stats.rejected, "rejected"],
     [money(stats.approved_value), "approved for payment"],
-    [stats.median_seconds != null ? `${stats.median_seconds} s` : "", "typical time per invoice"],
+    [stats.median_seconds != null ? `${stats.median_seconds} s` : "–", "median time per invoice"],
     [stats.by_email, "arrived by email"],
   ];
   const rows = el("tbody");
@@ -669,8 +668,8 @@ async function showOrders(view) {
   };
 
   view.replaceChildren(el("div", { class: "page" },
-    el("h1", {}, "What every invoice is checked against"),
-    el("p", { class: "lede" }, `This stands in for the procurement system. An invoice may go over what is left on its purchase order by up to ${data.tolerance_pct}% of the PO before a person is asked. Approved invoices are added to the recorded list and reduce what is left.`),
+    el("h1", {}, "Purchase orders and vendors"),
+    el("p", { class: "lede" }, `The procurement data every invoice is checked against. Tolerance: up to ${data.tolerance_pct}% of a PO over its remaining balance.`),
 
     el("h2", {}, "Purchase orders"),
     el("div", { class: "table-scroll" }, el("table", { class: "ledger" },
