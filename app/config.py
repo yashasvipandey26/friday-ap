@@ -99,6 +99,7 @@ def _mail_settings() -> MailSettings | None:
         smtp_host=os.getenv("MATCHBOOK_MAIL_SMTP_HOST") or "smtp.gmail.com",
         smtp_port=int(os.getenv("MATCHBOOK_MAIL_SMTP_PORT") or "465"),
         poll_seconds=max(5, int(os.getenv("MATCHBOOK_MAIL_POLL_SECONDS") or "20")),
+        lookback_days=max(1, int(os.getenv("MATCHBOOK_MAIL_LOOKBACK_DAYS") or "3")),
     )
 
 

@@ -18,6 +18,7 @@ import smtplib
 import ssl
 import threading
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -41,6 +42,7 @@ class MailSettings:
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 465
     poll_seconds: int = 20
+    lookback_days: int = 3  # how far back the inbox is searched, read or unread
 
 
 @dataclass(frozen=True)
@@ -184,11 +186,18 @@ def is_deliverable(address: str | None) -> bool:
 
 
 class InboxWatcher:
-    """Checks the inbox for unread email on a timer, in its own thread."""
+    """Checks the inbox on a timer, in its own thread.
 
-    def __init__(self, settings: MailSettings, handle: Callable[[InboundEmail], None]) -> None:
+    It looks at every email from the last few days, read or unread, so opening an email in Gmail first
+    doesn't hide it from the app. Each email is recognised by its Message-ID, which is checked against
+    the database before the full email is downloaded, so nothing is processed twice.
+    """
+
+    def __init__(self, settings: MailSettings, handle: Callable[[InboundEmail], None],
+                 already_taken_in: Callable[[list[str]], set[str]]) -> None:
         self._settings = settings
         self._handle = handle
+        self._already_taken_in = already_taken_in
         self._wake = threading.Event()
         self._stopped = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="inbox-watcher", daemon=True)
@@ -217,8 +226,8 @@ class InboxWatcher:
             with imaplib.IMAP4_SSL(self._settings.imap_host, timeout=30) as imap:
                 imap.login(self._settings.address, self._settings.app_password)
                 imap.select("INBOX")
-                _, found = imap.uid("SEARCH", None, "UNSEEN")
-                for uid in found[0].split()[:10]:  # a burst of email is worked through ten at a time
+                _, found = imap.uid("SEARCH", None, "SINCE", _imap_date(self._settings.lookback_days))
+                for uid in self._new_uids(imap, found[0].split())[:15]:  # a burst is worked through 15 at a time
                     self._take(imap, uid)
             self.last_checked, self.last_error = utc_now(), None
         except imaplib.IMAP4.error as error:
@@ -228,8 +237,24 @@ class InboxWatcher:
             self.last_error = f"Couldn't reach the mailbox: {error}"
             logger.warning("Inbox check failed: %s", error)
 
+    def _new_uids(self, imap: imaplib.IMAP4_SSL, uids: list[bytes]) -> list[bytes]:
+        """The emails not taken in yet, judged from their headers alone (cheap to fetch every 20 seconds)."""
+        if not uids:
+            return []
+        _, parts = imap.uid("FETCH", b",".join(uids), "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+        message_ids: dict[bytes, str] = {}
+        for part in parts:
+            if not isinstance(part, tuple):
+                continue
+            uid = re.search(rb"UID (\d+)", part[0])
+            found = re.search(rb"(?im)^message-id:\s*(\S+)", part[1] or b"")
+            if uid and found:
+                message_ids[uid.group(1)] = found.group(1).decode("ascii", "replace")
+        known = self._already_taken_in(sorted(set(message_ids.values())))
+        # An email without a Message-ID is downloaded anyway; the intake recognises it by its content.
+        return [uid for uid in uids if message_ids.get(uid) not in known]
+
     def _take(self, imap: imaplib.IMAP4_SSL, uid: bytes) -> None:
-        # BODY.PEEK leaves the email unread until it has been handled, so a crash part-way means a retry.
         _, parts = imap.uid("FETCH", uid, "(BODY.PEEK[])")
         raw = next((part[1] for part in parts if isinstance(part, tuple)), None)
         if raw is None:
@@ -237,6 +262,15 @@ class InboxWatcher:
         try:
             self._handle(parse_email(raw))
         except Exception:
-            logger.exception("Couldn't take in email %s; it stays unread and is tried again next time", uid)
+            logger.exception("Couldn't take in email %s; it is tried again on the next check", uid)
             return
-        imap.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+        imap.uid("STORE", uid, "+FLAGS", "(\\Seen)")  # a courtesy for whoever opens the mailbox
+
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _imap_date(days_back: int) -> str:
+    """IMAP wants 12-Nov-2026, always in English month names, whatever the server's locale."""
+    day = date.today() - timedelta(days=days_back)
+    return f"{day.day}-{_MONTHS[day.month - 1]}-{day.year}"

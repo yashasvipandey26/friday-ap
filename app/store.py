@@ -58,10 +58,13 @@ CREATE TABLE IF NOT EXISTS outbox (
     id {id}, created_at TEXT NOT NULL, run_id INTEGER, email_id INTEGER,
     kind TEXT NOT NULL, to_address TEXT, to_name TEXT, subject TEXT NOT NULL, body TEXT NOT NULL,
     in_reply_to TEXT, status TEXT NOT NULL, reason TEXT, sent_at TEXT, sent_message_id TEXT
+);
+CREATE TABLE IF NOT EXISTS mail_seen (
+    message_id TEXT PRIMARY KEY, seen_at TEXT NOT NULL
 )
 """
 
-_TABLES = ("vendors", "purchase_orders", "ledger", "emails", "runs", "outbox")
+_TABLES = ("vendors", "purchase_orders", "ledger", "emails", "runs", "outbox", "mail_seen")
 _RUN_JSON_COLUMNS = ("stages", "invoice", "decision", "explanation")
 _RUN_SUMMARY_COLUMNS = (
     "runs.id, runs.created_at, runs.finished_at, runs.filename, runs.source, runs.status, runs.outcome, "
@@ -111,7 +114,11 @@ class Store:
             )
 
     def clear_runs(self) -> None:
-        """Forget the run history, and with it the emails and messages that belong to it."""
+        """Forget the run history, and with it the emails and messages that belong to it.
+
+        `mail_seen` is kept on purpose: the mailbox still holds those emails, and forgetting them would
+        process them again and send the same replies a second time.
+        """
         with self._db.transaction() as tx:
             for table in ("outbox", "runs", "emails"):
                 tx.execute(f"DELETE FROM {table}")
@@ -265,6 +272,13 @@ class Store:
         rather than lost; one that was taken in successfully is never processed twice.
         """
         with self._db.transaction() as tx:
+            earlier = tx.query_one("SELECT id, status FROM emails WHERE message_id = ?", (message_id,))
+            if earlier:
+                return earlier["id"] if earlier["status"] in ("received", "failed") else None
+            if tx.query_one("SELECT 1 AS seen FROM mail_seen WHERE message_id = ?", (message_id,)):
+                return None  # taken in before the run history was cleared
+            tx.execute("INSERT INTO mail_seen (message_id, seen_at) VALUES (?, ?) ON CONFLICT (message_id) DO NOTHING",
+                       (message_id, utc_now()))
             row = tx.query_one(
                 "INSERT INTO emails (message_id, received_at, from_address, from_name, subject, body_preview, "
                 "attachment_count, can_reply, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'received') "
@@ -272,10 +286,21 @@ class Store:
                 (message_id, utc_now(), from_address, from_name, subject, body_preview, attachment_count,
                  int(can_reply)),
             )
-            if row:
-                return row["id"]
-            earlier = tx.query_one("SELECT id, status FROM emails WHERE message_id = ?", (message_id,))
-        return earlier["id"] if earlier and earlier["status"] in ("received", "failed") else None
+        return row["id"] if row else None
+
+    def emails_already_taken_in(self, message_ids: list[str]) -> set[str]:
+        """Which of these emails need nothing more: taken in before, and not waiting for a retry."""
+        if not message_ids:
+            return set()
+        marks = ", ".join("?" for _ in message_ids)
+        with self._db.transaction() as tx:
+            seen = {row["message_id"] for row in tx.query(
+                f"SELECT message_id FROM mail_seen WHERE message_id IN ({marks}) "
+                f"UNION SELECT message_id FROM emails WHERE message_id IN ({marks})", message_ids + message_ids)}
+            retry = {row["message_id"] for row in tx.query(
+                f"SELECT message_id FROM emails WHERE status IN ('received', 'failed') AND message_id IN ({marks})",
+                message_ids)}
+        return seen - retry
 
     def update_email(self, email_id: int, **fields: Any) -> None:
         self._update("emails", email_id, fields)

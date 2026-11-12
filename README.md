@@ -54,8 +54,8 @@ To try it, email one of the files in `samples/` to the app's address **from a di
 appears on the Inbox page, the run starts, and any reply lands in the account you sent from, in the
 same thread.
 
-Leave the app's mailbox to the app: it takes in unread email, so an email you open in Gmail first is
-skipped.
+It looks at every email from the last 3 days, read or unread, so opening an email in Gmail doesn't
+hide it. Each email is recognised by its Message-ID and processed once, even after "Clear run history".
 
 ## Keep runs and files in the cloud (Supabase, free)
 
@@ -168,6 +168,7 @@ All optional except one API key. See `.env.example`.
 | `MATCHBOOK_PROCUREMENT_EMAIL` | none | Receives notes meant for PO owners |
 | `MATCHBOOK_MAIL_SEND` | `auto` | `auto` sends replies at once; `manual` waits for a person to press Send |
 | `MATCHBOOK_MAIL_POLL_SECONDS` | `20` | How often the mailbox is checked |
+| `MATCHBOOK_MAIL_LOOKBACK_DAYS` | `3` | How many days back the mailbox is searched, read or unread |
 | `DATABASE_URL` | none (SQLite) | Postgres connection string, e.g. Supabase's session pooler |
 | `SUPABASE_URL` | none (local folder) | Supabase project URL, for file storage |
 | `SUPABASE_SERVICE_ROLE_KEY` | none | Supabase secret key, for file storage |

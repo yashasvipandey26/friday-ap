@@ -227,3 +227,78 @@ def test_manual_mode_waits_for_a_person_and_a_failed_send_can_be_retried(desk, s
     assert outbox.send(message["id"])["status"] == "sent"
     with pytest.raises(ValueError):
         outbox.send(message["id"])  # never twice
+
+
+# --------------------------------------------------------------------------- watching the mailbox
+
+
+class FakeGmail:
+    """Just enough IMAP: SEARCH SINCE, FETCH headers or whole emails by UID, and STORE flags."""
+
+    def __init__(self, emails: dict[bytes, bytes]) -> None:
+        self.emails, self.downloaded, self.flagged = emails, [], []
+
+    def __call__(self, host, timeout=None):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def login(self, user, password):
+        pass
+
+    def select(self, mailbox):
+        pass
+
+    def uid(self, command, *args):
+        if command == "SEARCH":
+            assert args[1] == "SINCE"  # every recent email, read or unread
+            return "OK", [b" ".join(self.emails)]
+        if command == "FETCH" and "HEADER.FIELDS" in args[1]:
+            parts = []
+            for uid in args[0].split(b","):
+                message_id = parse_email(self.emails[uid]).message_id.encode()
+                parts += [(b"%s (UID %s BODY[HEADER.FIELDS (MESSAGE-ID)] {60}" % (uid, uid),
+                           b"Message-ID: " + message_id + b"\r\n\r\n"), b")"]
+            return "OK", parts
+        if command == "FETCH":
+            self.downloaded.append(args[0])
+            return "OK", [(b"%s (UID %s BODY[] {9})" % (args[0], args[0]), self.emails[args[0]]), b")"]
+        if command == "STORE":
+            self.flagged.append(args[0])
+            return "OK", []
+
+
+def test_emails_already_opened_in_gmail_are_still_picked_up_once(desk, intake, settings, monkeypatch):
+    import app.mail as mail
+    from app.mail import InboxWatcher, MailSettings
+
+    gmail = FakeGmail({b"7": email(subject="Opened already", attachments=[pdf(settings, "01-kaveri-chairs-and-desks.pdf")]),
+                       b"8": email(subject="Brand new", attachments=[pdf(settings)])})
+    monkeypatch.setattr(mail.imaplib, "IMAP4_SSL", gmail)
+    watcher = InboxWatcher(MailSettings(address=APP_ADDRESS, app_password="x"), intake.handle,
+                           desk.store.emails_already_taken_in)
+
+    watcher.check_once()
+    watcher.check_once()  # the next check finds nothing new
+
+    assert watcher.last_error is None
+    assert gmail.downloaded == [b"7", b"8"]
+    assert {email_row["subject"] for email_row in desk.store.recent_emails()} == {"Opened already", "Brand new"}
+
+    desk.store.clear_runs()
+    watcher.check_once()  # clearing the history must not re-send replies for the same emails
+    assert gmail.downloaded == [b"7", b"8"] and desk.store.recent_emails() == []
+
+
+def test_an_email_whose_intake_failed_is_fetched_again(desk, settings):
+    raw = parse_email(email(attachments=[pdf(settings)]))
+    email_id = desk.store.claim_email(raw.message_id, VENDOR, "", "Invoice", "", 1, can_reply=True)
+    desk.store.update_email(email_id, status="failed")
+
+    assert desk.store.emails_already_taken_in([raw.message_id]) == set()
+    desk.store.update_email(email_id, status="processed")
+    assert desk.store.emails_already_taken_in([raw.message_id]) == {raw.message_id}

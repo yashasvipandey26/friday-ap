@@ -81,7 +81,7 @@ def create_app(
     watcher = None
     if settings.mail and mailer:
         intake = EmailIntake(store, files, queue, outbox, settings.mail.address, settings.max_upload_bytes)
-        watcher = InboxWatcher(settings.mail, intake.handle)
+        watcher = InboxWatcher(settings.mail, intake.handle, store.emails_already_taken_in)
     samples = {sample["id"]: sample for sample in json.loads((settings.samples_dir / "manifest.json").read_text())}
 
     @asynccontextmanager
