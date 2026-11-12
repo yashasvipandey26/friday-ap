@@ -18,7 +18,7 @@ from tests.readings import StubReader
 
 # Point this at an empty Postgres database (for example a local Docker one) to run every test against
 # Postgres instead of SQLite. All tables in it are dropped before each test.
-POSTGRES_URL = os.getenv("FRIDAY_TEST_DATABASE_URL")
+POSTGRES_URL = os.getenv("MATCHBOOK_TEST_DATABASE_URL")
 
 
 class FakeMailer:

@@ -1,8 +1,14 @@
-// Friday front end. No framework and no build step: one module that draws four views into <main>.
+// Matchbook front end. No framework and no build step: one module that draws four views into <main>.
 // Everything that comes from an invoice is written with textContent (via el), never as HTML.
 
-const view = document.getElementById("view");
-const state = { liveRunId: null, cameFrom: "inbox", stopWatching: () => {}, runFilter: "all", health: null };
+const main = document.getElementById("view");
+const state = { liveRunId: null, cameFrom: "inbox", runFilter: "all", health: null };
+
+// Every navigation draws into a fresh page element of its own. Only the newest one is put on screen:
+// clicking quickly through the tabs shows a loader and then the last tab, never the ones in between.
+// Anything still running for an older page (a slow fetch, a refresh timer) checks this and stops.
+const nav = { page: null };
+const isCurrent = (page) => page === nav.page;
 
 // ---------------------------------------------------------------- small helpers
 
@@ -78,10 +84,12 @@ function outcomeOf(run) {
 }
 
 // Redraws a page every few seconds while it is open, so email arriving in the background shows up.
-function refreshEvery(ms, redraw) {
-  let stopped = false;
-  const timer = setInterval(() => { if (!stopped) redraw().catch(() => {}); }, ms);
-  state.stopWatching = () => { stopped = true; clearInterval(timer); };
+function refreshEvery(view, ms, redraw) {
+  const timer = setInterval(() => {
+    if (isCurrent(view)) redraw().catch(() => {});
+    else clearInterval(timer);
+  }, ms);
+  return () => clearInterval(timer);
 }
 
 // ---------------------------------------------------------------- routing
@@ -89,7 +97,6 @@ function refreshEvery(ms, redraw) {
 const routes = { inbox: showInbox, runs: showRuns, orders: showOrders };
 
 function route() {
-  state.stopWatching();
   const name = location.hash.replace(/^#/, "") || "inbox";
   const runId = name.match(/^run-(\d+)$/)?.[1];
   const section = runId ? state.cameFrom : (routes[name] ? name : "inbox");
@@ -97,17 +104,22 @@ function route() {
     if (link.dataset.nav === section) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
-  const draw = runId ? () => showRun(Number(runId)) : routes[section];
-  draw().catch((error) => {
-    view.replaceChildren(el("p", { class: "empty" }, error.message));
-  });
+  const view = el("div", { class: "page-frame" });
+  nav.page = view;
+  main.replaceChildren(el("div", { class: "page-loading", role: "status" }, el("span", { class: "spinner" }), "Loading…"));
+  window.scrollTo(0, 0);
+  const draw = runId ? showRun(Number(runId), view) : routes[section](view);
+  draw.then(
+    () => { if (isCurrent(view)) main.replaceChildren(view); },
+    (error) => { if (isCurrent(view)) main.replaceChildren(el("p", { class: "empty" }, error.message)); },
+  );
 }
 
 window.addEventListener("hashchange", route);
 
 // ---------------------------------------------------------------- inbox: start a run
 
-async function showInbox() {
+async function showInbox(view) {
   state.cameFrom = "inbox";
   const samples = await api("/api/samples");
 
@@ -143,7 +155,7 @@ async function showInbox() {
     el("div", { class: "intake" },
       el("section", { class: "intake-lede" },
         el("h1", {}, "Email an invoice in, or drop one here, and watch every check happen."),
-        el("p", {}, "Friday reads the document, checks it against the approved vendors and open purchase orders, " +
+        el("p", {}, "Matchbook reads the document, checks it against the approved vendors and open purchase orders, " +
           "and decides whether to pay it. Each step is shown as it runs, the reason comes in plain English, " +
           "and whoever needs to know is emailed."),
         mailbox,
@@ -156,7 +168,7 @@ async function showInbox() {
 
   const drawMailbox = async () => mailbox.replaceChildren(...mailboxNodes(await api("/api/mailbox")));
   await drawMailbox().catch((error) => mailbox.replaceChildren(el("p", { class: "mailbox-error" }, error.message)));
-  refreshEvery(5000, drawMailbox);
+  refreshEvery(view, 5000, drawMailbox);
 }
 
 const EMAIL_STATUS = {
@@ -169,8 +181,8 @@ const EMAIL_STATUS = {
 
 function mailboxNodes(box) {
   if (!box.enabled) {
-    return [el("p", { class: "fine-print mailbox-off" }, "Email intake is off. Set FRIDAY_MAIL_ADDRESS and " +
-      "FRIDAY_MAIL_APP_PASSWORD on the server to have invoices emailed straight in.")];
+    return [el("p", { class: "fine-print mailbox-off" }, "Email intake is off. Set MATCHBOOK_MAIL_ADDRESS and " +
+      "MATCHBOOK_MAIL_APP_PASSWORD on the server to have invoices emailed straight in.")];
   }
   const check = el("button", { class: "button quiet small", type: "button" }, "Check now");
   check.addEventListener("click", async () => {
@@ -232,7 +244,7 @@ const WORKING = {
 const ACTORS = { ai: "AI", rules: "Rules" };
 const MARKS = { pass: "✓", note: "✓", review: "!", reject: "×", skipped: "–" };
 
-async function showRun(id) {
+async function showRun(id, view) {
   const live = state.liveRunId === id;
   state.liveRunId = null;
   const run = await api(`/api/runs/${id}`);
@@ -261,7 +273,7 @@ async function showRun(id) {
         el("section", { class: "working", "aria-label": "The checks" }, stages, verdict))));
 
   const frame = { status, stages, verdict };
-  if (live || isActive(run)) watchRun(id, frame);
+  if (live || isActive(run)) watchRun(id, frame, view);
   else paintRun(run, frame, { revealed: run.stages.length, live: false });
 }
 
@@ -276,16 +288,14 @@ function sourceNode(run) {
     run.source === "sample" ? " From the sample inbox" : " Uploaded in the browser");
 }
 
-function watchRun(id, frame) {
+function watchRun(id, frame, view) {
   // The page is allowed to finish at most one stage per tick, so a rule that takes 2 ms is still
   // seen happening. The timings printed beside each stage are the real ones from the server.
   let revealed = 0;
   let latest = null;
-  let stopped = false;
-  state.stopWatching = () => { stopped = true; };
 
   const tick = async () => {
-    if (stopped) return;
+    if (!isCurrent(view)) return;  // the user has moved to another page
     try {
       if (!latest || isActive(latest)) latest = await api(`/api/runs/${id}`);
     } catch (error) {
@@ -557,14 +567,14 @@ const FILTERS = [
   { key: "rejected", label: "Rejected", test: (run) => outcomeOf(run).tone === "reject" },
 ];
 
-async function showRuns() {
+async function showRuns(view) {
   state.cameFrom = "runs";
   const { stats, runs } = await api("/api/runs");
   let signature = JSON.stringify(runs.map((run) => [run.id, run.status, run.outcome, run.resolution]));
-  refreshEvery(5000, async () => {  // new email or finished runs appear without a reload
+  const stop = refreshEvery(view, 5000, async () => {  // new email or finished runs appear without a reload
     const latest = await api("/api/runs");
     const next = JSON.stringify(latest.runs.map((run) => [run.id, run.status, run.outcome, run.resolution]));
-    if (next !== signature && location.hash === "#runs") { signature = next; state.stopWatching(); await showRuns(); }
+    if (next !== signature) { signature = next; stop(); await showRuns(view); }
   });
 
   if (!runs.length) {
@@ -628,7 +638,7 @@ function runRow(run) {
 
 // ---------------------------------------------------------------- purchase orders: what the rules check against
 
-async function showOrders() {
+async function showOrders(view) {
   state.cameFrom = "orders";
   const data = await api("/api/procurement");
 
@@ -650,7 +660,7 @@ async function showOrders() {
     if (!confirm(question)) return;
     try {
       await postJson("/api/demo/reset", { scope });
-      await showOrders();
+      await showOrders(view);
       toast(scope === "runs" ? "Run history cleared." : "Purchase orders and recorded invoices are back to their starting state.");
     } catch (error) {
       toast(error.message);
@@ -680,7 +690,7 @@ async function showOrders() {
       el("tbody", {}, data.ledger.map((entry) => el("tr", {},
         el("td", {}, day(entry.posted_at)), el("td", {}, entry.vendor_name), el("td", {}, entry.invoice_number),
         el("td", {}, entry.po_number || ""), el("td", { class: "num" }, money(entry.pre_tax)), el("td", { class: "num" }, money(entry.total)),
-        el("td", {}, { history: "Before Friday", friday: "Friday, automatically", reviewer: "A reviewer" }[entry.recorded_by])))))),
+        el("td", {}, { history: "Before Matchbook", matchbook: "Matchbook, automatically", reviewer: "A reviewer" }[entry.recorded_by])))))),
 
     el("section", { class: "rehearsal" },
       el("h2", {}, "Rehearsal controls"),
@@ -706,6 +716,6 @@ api("/api/health").then((health) => {
   status.classList.add(health.ai_ready ? "is-ready" : "is-missing");
   const mail = document.getElementById("mail-status");
   mail.textContent = health.mail.enabled ? "Inbox connected" : "Inbox off";
-  mail.title = health.mail.enabled ? `Watching ${health.mail.address}` : "Set FRIDAY_MAIL_ADDRESS and FRIDAY_MAIL_APP_PASSWORD to receive invoices by email.";
+  mail.title = health.mail.enabled ? `Watching ${health.mail.address}` : "Set MATCHBOOK_MAIL_ADDRESS and MATCHBOOK_MAIL_APP_PASSWORD to receive invoices by email.";
   mail.classList.add(health.mail.enabled && !health.mail.last_error ? "is-ready" : "is-missing");
 }).catch(() => {}).finally(route);

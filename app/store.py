@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS outbox (
 )
 """
 
+_TABLES = ("vendors", "purchase_orders", "ledger", "emails", "runs", "outbox")
 _RUN_JSON_COLUMNS = ("stages", "invoice", "decision", "explanation")
 _RUN_SUMMARY_COLUMNS = (
     "runs.id, runs.created_at, runs.finished_at, runs.filename, runs.source, runs.status, runs.outcome, "
@@ -85,6 +86,11 @@ class Store:
         with self._db.transaction() as tx:
             for statement in schema(self._db.dialect, _SCHEMA):
                 tx.execute(statement)
+            if self._db.dialect == "postgres":
+                # Supabase publishes every public table through its web API. Row-level security with no
+                # policies closes that door; the app connects as the table owner, which RLS doesn't restrict.
+                for table in _TABLES:
+                    tx.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
             if tx.query_one("SELECT COUNT(*) AS n FROM vendors")["n"] == 0:
                 self._load_seed(tx)
 

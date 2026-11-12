@@ -1,12 +1,12 @@
-# Walkthrough
+# Zamp AI Matchbook: walkthrough
 
-Notes on how Friday works and why it is built this way. Read this before recording the video or
+Notes on how Matchbook works and why it is built this way. Read this before recording the video or
 doing the live demo; the interview questions will mostly be "why did you do it that way".
 
 ## The idea
 
 An AP clerk does three different kinds of work on every invoice: reading a messy document, applying
-company rules, and explaining the result to someone else. Friday gives each kind of work to
+company rules, and explaining the result to someone else. Matchbook gives each kind of work to
 whatever is good at it.
 
 - **Reading** goes to an AI model. Layouts vary, scans are crooked, and no template survives the
@@ -55,16 +55,16 @@ Two behaviours cut across the stages:
 
 **Compare against what is left on the PO, not the PO total.** The obvious check is "invoice amount
 is at most PO amount". It passes every instalment of a split PO, including the one that takes the
-total over. Friday keeps a ledger of recorded invoices and compares with the remaining balance.
+total over. Matchbook keeps a ledger of recorded invoices and compares with the remaining balance.
 
-**A guessed PO is never approved automatically.** When an invoice has no PO number, Friday scores
+**A guessed PO is never approved automatically.** When an invoice has no PO number, Matchbook scores
 the vendor's open POs (60% how well the amount fits the balance, 40% how much the wording overlaps)
 and suggests the winner if it scores at least 75% with a clear lead. Even a 93% match goes to a
 person, with one click to confirm. Guessing wrong silently bills the wrong budget; asking costs ten
 seconds.
 
 **The arithmetic is the confidence check.** Models report their own confidence badly. Instead of
-trusting a self-reported score, Friday checks that line items, tax and total reconcile. If the
+trusting a self-reported score, Matchbook checks that line items, tax and total reconcile. If the
 numbers add up, they were almost certainly read correctly; if they do not, a person looks. The
 model's "unsure about" list is used as well, but as a second signal.
 
@@ -74,17 +74,17 @@ invoices, which is the commonest way a duplicate gets paid.
 
 **The rules decide who is emailed; the outbox only finds the address.** A vendor message answers the
 email the invoice came in, in the same thread. A PO-owner message goes to the owner of the matched
-PO. Replies go out automatically (`FRIDAY_MAIL_SEND=auto`), and every one is shown on its run with
+PO. Replies go out automatically (`MATCHBOOK_MAIL_SEND=auto`), and every one is shown on its run with
 its status, so nothing is sent that isn't visible. `manual` makes each one wait for a Send button.
 
 **Nothing goes back towards the sender when the bank details change.** For a changed bank account
-Friday sends nothing, and the run says why: the reviewer phones the number in the vendor master. If
+Matchbook sends nothing, and the run says why: the reviewer phones the number in the vendor master. If
 the invoice is fraudulent, replying to it reaches the fraudster. The outbox enforces this a second
 time, so even a vendor draft that slipped through is held.
 
 **No mail loops.** Mail from the app's own address and delivery failures are ignored. Automated
 senders (no-reply addresses, auto-responders) have their invoices processed, but are never answered.
-Every email Friday sends carries `Auto-Submitted`, which tells other systems not to auto-reply. An
+Every email Matchbook sends carries `Auto-Submitted`, which tells other systems not to auto-reply. An
 email with no invoice gets one polite request for it, but a reply in an existing thread ("thanks!")
 gets nothing.
 
@@ -98,7 +98,7 @@ so structured output is the supported way to get a fixed shape back.
 
 **The provider is a setting, not a dependency.** Claude and Gemini sit behind the same small
 interface (`ai.JsonModel`): instructions, an optional file, a prompt and a schema in, JSON out. Both
-use the same schema and the same instructions. `FRIDAY_AI_PROVIDER` and `FRIDAY_MODEL` in `.env`
+use the same schema and the same instructions. `MATCHBOOK_AI_PROVIDER` and `MATCHBOOK_MODEL` in `.env`
 choose which one runs. Since only the reading changes between providers and the rules don't, the
 decisions differ only if the two models read an invoice differently, and the "See everything that
 was read" panel shows exactly that.
@@ -125,7 +125,7 @@ is taken in once (by its Message-ID), and one whose intake failed is retried rat
 
 **A busy model fails over instead of failing.** Free AI tiers return "503 high demand" often. The
 reader tries the main model with few retries, and on an overload hands the document to a backup
-model (`FRIDAY_FALLBACK_MODEL`). The run says which model read it. A bad key or a refusal is not
+model (`MATCHBOOK_FALLBACK_MODEL`). The run says which model read it. A bad key or a refusal is not
 retried on the backup, because it would fail the same way. If both are busy, the run goes to a
 person with "Run it again".
 
@@ -134,23 +134,23 @@ person with "Run it again".
 Each one is a case where a simpler process gets the wrong answer.
 
 **1. Changed bank details (Northwind).** Vendor approved, PO found, amounts exact, tax right. A
-process that only matches invoice to PO approves it. Friday holds it because the account on the
+process that only matches invoice to PO approves it. Matchbook holds it because the account on the
 invoice differs from the vendor record, and says how to verify. This is the one to lead with: every
 check is green except the one that matters.
 
 **2. Third invoice on a split PO (Brightpath).** The PO is ₹9,00,000. Two invoices totalling
 ₹6,60,000 are already recorded. This one is ₹3,00,000: fine on its own, ₹60,000 over in total,
-because two unapproved change requests were added to the final milestone. Friday flags the overage
+because two unapproved change requests were added to the final milestone. Matchbook flags the overage
 and drafts a note to the PO owner. Approving it as a reviewer then shows up on the Purchase orders
 page as a changed balance.
 
 **3. Scanned bill with no PO number (Sahyadri).** No text layer, one bundled line, tax included in
-the price, and only "as per your order dt. 21-10-2026" for a reference. Friday reads it as an
+the price, and only "as per your order dt. 21-10-2026" for a reference. Matchbook reads it as an
 image, works the tax back out (₹1,01,480 is ₹86,000 before 18% GST), scores the vendor's two open
 POs, suggests the right one and shows the scores. It still asks a person to confirm.
 
 **4. Re-sent invoice with a retyped number (Kaveri reminder).** `KOS-26-27-874` is
-`KOS/26-27/0874`, paid in October. Exact matching misses it. Friday rejects it, names the original,
+`KOS/26-27/0874`, paid in October. Exact matching misses it. Matchbook rejects it, names the original,
 and drafts a reply to the vendor. Running the happy-path invoice a second time shows the same rule
 from another angle.
 
@@ -176,13 +176,13 @@ The brief says to make assumptions and note them.
 
 - Purchase orders are raised before tax, so invoices are compared before tax.
 - Tolerance is 2% of the PO value, applied to the amount over the remaining balance. It is one
-  setting (`FRIDAY_TOLERANCE_PCT`).
+  setting (`MATCHBOOK_TOLERANCE_PCT`).
 - An invoice from a vendor who is not on the approved list is never paid; it goes to a person, who
   sends the vendor to onboarding.
 - There is no goods-received data, so this is a two-way match (invoice against PO), not three-way.
-- Approval here means "recorded and queued for payment". Friday does not move money.
+- Approval here means "recorded and queued for payment". Matchbook does not move money.
 - The PO owners in the sample data aren't real, so their notes go to one procurement inbox
-  (`FRIDAY_PROCUREMENT_EMAIL`), addressed to the owner by name.
+  (`MATCHBOOK_PROCUREMENT_EMAIL`), addressed to the owner by name.
 - The sample data is Indian (rupees, GST, GSTIN). Nothing in the rules depends on that except the
   number formatting.
 
@@ -228,7 +228,7 @@ Say it in your own words; these are only the beats. Three runs fit comfortably i
 
 Being clear about these is worth more than hiding them.
 
-- **No three-way match.** There is no goods-received data, so Friday cannot tell whether what was
+- **No three-way match.** There is no goods-received data, so Matchbook cannot tell whether what was
   billed was delivered.
 - **Line items are not matched one by one** against PO lines; only totals and wording are compared.
 - **The mailbox is polled, not pushed.** Checking every 20 seconds over IMAP is simple and works with
@@ -252,7 +252,7 @@ Being clear about these is worth more than hiding them.
   towards payment.
 - *How would this handle 500 invoices a month?* That is about 25 a working day. The rules take
   milliseconds; the model call is the cost and the wait. Runs already go through a worker pool, so
-  raise `FRIDAY_WORKERS` on a paid AI tier. People only see the ones that need them.
+  raise `MATCHBOOK_WORKERS` on a paid AI tier. People only see the ones that need them.
 - *What if two copies of an invoice arrive at once?* The database refuses to record the same vendor
   and invoice number twice, so the second becomes a duplicate even if both passed the check together.
 - *What if the server restarts mid-run?* Unfinished runs start again when it comes back, and every

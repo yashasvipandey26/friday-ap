@@ -74,7 +74,7 @@ class Outbox:
         address = self._procurement_email or (po.owner_email if po else None)
         if not address:
             return (None, None, None, subject, body,
-                    "Not sent: there is no PO owner to send this to. Set FRIDAY_PROCUREMENT_EMAIL.")
+                    "Not sent: there is no PO owner to send this to. Set MATCHBOOK_PROCUREMENT_EMAIL.")
         if self._procurement_email and po and owner:
             body = f"For {owner}, who raised {po.po_number}.\n\n{body}"
         return address, owner or "Procurement", None, subject, body, self._undeliverable(address)
@@ -84,7 +84,7 @@ class Outbox:
         if is_deliverable(address):
             return None
         return (f"Not sent: {address} is a placeholder address from the sample data. "
-                "Set FRIDAY_PROCUREMENT_EMAIL to receive PO-owner notes.")
+                "Set MATCHBOOK_PROCUREMENT_EMAIL to receive PO-owner notes.")
 
     def _draft_reason(self) -> str | None:
         if self._mailer is None:
@@ -103,7 +103,7 @@ class Outbox:
         if message["status"] not in ("draft", "failed"):
             raise ValueError("This message can't be sent: it was already sent, or it is held on purpose.")
         if self._mailer is None:
-            raise ValueError("Email isn't set up. Add FRIDAY_MAIL_ADDRESS and FRIDAY_MAIL_APP_PASSWORD.")
+            raise ValueError("Email isn't set up. Add MATCHBOOK_MAIL_ADDRESS and MATCHBOOK_MAIL_APP_PASSWORD.")
         try:
             sent_id = self._mailer.send(to_address=message["to_address"], to_name=message["to_name"],
                                         subject=message["subject"], body=message["body"],

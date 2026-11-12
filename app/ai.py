@@ -346,7 +346,7 @@ class GeminiModel:
             if error.code == 429:
                 raise ModelBusy("The AI service is rate-limiting requests. Try again in a minute.") from error
             if error.code == 404:
-                raise ReaderError(f"The model “{self._model}” wasn't found. Check FRIDAY_MODEL.") from error
+                raise ReaderError(f"The model “{self._model}” wasn't found. Check MATCHBOOK_MODEL.") from error
             raise ReaderError(f"The AI service returned an error ({error.code}): {error.message}") from error
         except genai_errors.APIError as error:  # 5xx, including 503 "high demand"
             raise ModelBusy(f"The AI service returned an error ({error.code}): {error.message}") from error

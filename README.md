@@ -1,9 +1,9 @@
-# Friday
+# Zamp AI Matchbook
 
 Invoice processing for an accounts payable team, from email to decision. Built for PS-1 of the
 AI Solutions Analyst case study.
 
-A vendor emails an invoice (a PDF, a scan or a photo) to the AP mailbox. Friday picks it up, reads
+A vendor emails an invoice (a PDF, a scan or a photo) to the AP mailbox. Matchbook picks it up, reads
 it, checks it against approved vendors, purchase orders and earlier invoices, and comes back with
 one of three outcomes: approved, needs a person, or rejected. Every check is shown as it runs, the
 reason is written in plain English, and whoever needs to know is emailed: the vendor gets a reply in
@@ -37,15 +37,15 @@ cloud storage. Each is optional and independent.
 
 ## Receive invoices by email (Gmail, free, about 10 minutes)
 
-1. Create a new Gmail account just for the app, for example `friday.ap.yourname@gmail.com`.
+1. Create a new Gmail account just for the app, for example `matchbook.ap.yourname@gmail.com`.
 2. In that account, turn on 2-Step Verification (Google Account > Security).
-3. Open <https://myaccount.google.com/apppasswords>, create an app password called "Friday" and
+3. Open <https://myaccount.google.com/apppasswords>, create an app password called "Matchbook" and
    copy the 16 characters.
 4. In `.env`:
    ```
-   FRIDAY_MAIL_ADDRESS=friday.ap.yourname@gmail.com
-   FRIDAY_MAIL_APP_PASSWORD=abcd efgh ijkl mnop
-   FRIDAY_PROCUREMENT_EMAIL=you@yourmail.com     # receives the notes meant for PO owners
+   MATCHBOOK_MAIL_ADDRESS=matchbook.ap.yourname@gmail.com
+   MATCHBOOK_MAIL_APP_PASSWORD=abcd efgh ijkl mnop
+   MATCHBOOK_PROCUREMENT_EMAIL=you@yourmail.com     # receives the notes meant for PO owners
    ```
 5. Restart. The header says "Inbox connected" and the Inbox page shows the address.
 
@@ -102,7 +102,7 @@ pytest
 
 The tests run the real pipeline, rules, mail intake and outbox against a throwaway database. The AI
 reader and the mail server are replaced by stubs, so the tests are fast, free and repeatable. Set
-`FRIDAY_TEST_DATABASE_URL` to an empty Postgres database to run the same tests against Postgres.
+`MATCHBOOK_TEST_DATABASE_URL` to an empty Postgres database to run the same tests against Postgres.
 
 ## Put it online
 
@@ -124,7 +124,7 @@ Things to know about Render's free plan:
 - Without Supabase, the disk is wiped whenever the service sleeps or restarts.
 
 The link is public, so anyone who has it can spend your API credit. The app refuses more than 300
-runs a day (`FRIDAY_MAX_RUNS_PER_DAY`). A `Dockerfile` is included for any other host.
+runs a day (`MATCHBOOK_MAX_RUNS_PER_DAY`). A `Dockerfile` is included for any other host.
 
 ## How the code is laid out
 
@@ -157,22 +157,22 @@ All optional except one API key. See `.env.example`.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `FRIDAY_AI_PROVIDER` | whichever has a key | `anthropic` or `gemini` |
+| `MATCHBOOK_AI_PROVIDER` | whichever has a key | `anthropic` or `gemini` |
 | `GOOGLE_API_KEY` | none | Reads invoices with Gemini (`GEMINI_API_KEY` also works) |
 | `ANTHROPIC_API_KEY` | none | Reads invoices with Claude |
-| `FRIDAY_MODEL` | `gemini-3.6-flash` or `claude-sonnet-5-5` | Model used for reading and writing |
-| `FRIDAY_FALLBACK_MODEL` | `gemini-3.5-flash-lite` for Gemini | Tried when the main model is busy; `none` turns it off |
-| `FRIDAY_READ_EFFORT` | `medium` | How hard the model thinks while reading: `low`, `medium`, `high` |
-| `FRIDAY_MAIL_ADDRESS` | none | The mailbox invoices are sent to |
-| `FRIDAY_MAIL_APP_PASSWORD` | none | Its app password |
-| `FRIDAY_PROCUREMENT_EMAIL` | none | Receives notes meant for PO owners |
-| `FRIDAY_MAIL_SEND` | `auto` | `auto` sends replies at once; `manual` waits for a person to press Send |
-| `FRIDAY_MAIL_POLL_SECONDS` | `20` | How often the mailbox is checked |
+| `MATCHBOOK_MODEL` | `gemini-3.6-flash` or `claude-sonnet-5-5` | Model used for reading and writing |
+| `MATCHBOOK_FALLBACK_MODEL` | `gemini-3.5-flash-lite` for Gemini | Tried when the main model is busy; `none` turns it off |
+| `MATCHBOOK_READ_EFFORT` | `medium` | How hard the model thinks while reading: `low`, `medium`, `high` |
+| `MATCHBOOK_MAIL_ADDRESS` | none | The mailbox invoices are sent to |
+| `MATCHBOOK_MAIL_APP_PASSWORD` | none | Its app password |
+| `MATCHBOOK_PROCUREMENT_EMAIL` | none | Receives notes meant for PO owners |
+| `MATCHBOOK_MAIL_SEND` | `auto` | `auto` sends replies at once; `manual` waits for a person to press Send |
+| `MATCHBOOK_MAIL_POLL_SECONDS` | `20` | How often the mailbox is checked |
 | `DATABASE_URL` | none (SQLite) | Postgres connection string, e.g. Supabase's session pooler |
 | `SUPABASE_URL` | none (local folder) | Supabase project URL, for file storage |
 | `SUPABASE_SERVICE_ROLE_KEY` | none | Supabase secret key, for file storage |
-| `FRIDAY_TOLERANCE_PCT` | `2.0` | How far over a PO's balance an invoice may go, as % of the PO |
-| `FRIDAY_COMPANY_NAME` | `Meridian Retail` | Signs the emails |
-| `FRIDAY_WORKERS` | `2` | Invoices checked at the same time |
-| `FRIDAY_DATA_DIR` | `./var` | Where the local database and files live |
-| `FRIDAY_MAX_RUNS_PER_DAY` | `300` | Daily cap on runs |
+| `MATCHBOOK_TOLERANCE_PCT` | `2.0` | How far over a PO's balance an invoice may go, as % of the PO |
+| `MATCHBOOK_COMPANY_NAME` | `Meridian Retail` | Signs the emails |
+| `MATCHBOOK_WORKERS` | `2` | Invoices checked at the same time |
+| `MATCHBOOK_DATA_DIR` | `./var` | Where the local database and files live |
+| `MATCHBOOK_MAX_RUNS_PER_DAY` | `300` | Daily cap on runs |

@@ -126,7 +126,7 @@ class LedgerEntry(BaseModel):
     total: float
     po_number: str | None = None
     posted_at: str
-    recorded_by: Literal["history", "friday", "reviewer"] = "history"
+    recorded_by: Literal["history", "matchbook", "reviewer"] = "history"
     run_id: int | None = None
 
 

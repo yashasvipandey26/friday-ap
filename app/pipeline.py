@@ -361,7 +361,7 @@ class InvoicePipeline:
         return LedgerEntry(
             vendor_id=ctx.vendor.id, invoice_number=ctx.invoice.invoice_number,
             invoice_date=ctx.invoice.invoice_date, pre_tax=self._pre_tax(ctx), total=ctx.invoice.total,
-            po_number=self._po_number(ctx), posted_at=utc_now(), recorded_by="friday", run_id=ctx.run_id,
+            po_number=self._po_number(ctx), posted_at=utc_now(), recorded_by="matchbook", run_id=ctx.run_id,
         )
 
 

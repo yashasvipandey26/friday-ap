@@ -154,7 +154,7 @@ def test_gemini_writer_follows_the_same_rule_about_messages():
 
 @pytest.fixture
 def clean_env(monkeypatch):
-    for name in ("FRIDAY_AI_PROVIDER", "FRIDAY_MODEL", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+    for name in ("MATCHBOOK_AI_PROVIDER", "MATCHBOOK_MODEL", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
 
@@ -171,8 +171,8 @@ def test_only_a_google_key_means_gemini_with_its_default_model(clean_env):
 def test_provider_and_model_can_be_chosen_explicitly(clean_env):
     clean_env.setenv("ANTHROPIC_API_KEY", "a-key")
     clean_env.setenv("GEMINI_API_KEY", "g-key")
-    clean_env.setenv("FRIDAY_AI_PROVIDER", "Gemini")
-    clean_env.setenv("FRIDAY_MODEL", "gemini-4-argon")
+    clean_env.setenv("MATCHBOOK_AI_PROVIDER", "Gemini")
+    clean_env.setenv("MATCHBOOK_MODEL", "gemini-4-argon")
 
     settings = load_settings()
 
@@ -189,8 +189,8 @@ def test_with_no_choice_and_both_keys_anthropic_is_kept(clean_env):
 
 
 def test_an_unknown_provider_fails_at_start_up(clean_env):
-    clean_env.setenv("FRIDAY_AI_PROVIDER", "openai")
-    with pytest.raises(ValueError, match="FRIDAY_AI_PROVIDER"):
+    clean_env.setenv("MATCHBOOK_AI_PROVIDER", "openai")
+    with pytest.raises(ValueError, match="MATCHBOOK_AI_PROVIDER"):
         load_settings()
 
 

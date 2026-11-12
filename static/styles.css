@@ -1,4 +1,4 @@
-/* Friday. The look borrows from an accounts desk: green-bar ledger paper for anything tabular,
+/* Matchbook. The look borrows from an accounts desk: green-bar ledger paper for anything tabular,
    a highlighter for the line that needs a person, and a rubber stamp for the decision. */
 
 :root {
@@ -64,6 +64,7 @@ a { color: var(--pen); text-underline-offset: 0.18em; }
   letter-spacing: -0.03em;
   text-decoration: none;
 }
+.wordmark-maker { font-size: 0.62em; font-weight: 650; font-stretch: 90%; letter-spacing: 0; color: var(--ink-soft); }
 
 .masthead nav { display: flex; gap: 1.6rem; }
 .masthead nav a {
@@ -91,6 +92,8 @@ a { color: var(--pen); text-underline-offset: 0.18em; }
 
 #view { max-width: 80rem; margin: 0 auto; padding: 2rem var(--gutter) 4.5rem; }
 #view:focus { outline: none; }
+.page-loading { display: flex; align-items: center; gap: 0.6rem; min-height: 40vh; justify-content: center; color: var(--ink-soft); }
+.page-loading .spinner { display: inline-block; }
 
 /* ------------------------------------------------------------ buttons */
 

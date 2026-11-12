@@ -33,7 +33,7 @@ def test_two_copies_racing_past_the_duplicate_check_cannot_both_be_recorded(desk
     monkeypatch.setattr(rules, "find_duplicates", lambda *args, **kwargs: not_seen)
     desk.store.record_invoice(LedgerEntry(
         vendor_id="V-KAVERI", invoice_number="KOS/26-27/0931", invoice_date="2026-11-04", pre_tax=240000,
-        total=283200, posted_at="2026-11-12T10:00:00+00:00", recorded_by="friday", run_id=999))
+        total=283200, posted_at="2026-11-12T10:00:00+00:00", recorded_by="matchbook", run_id=999))
 
     run = desk.process(HAPPY)
 
@@ -163,3 +163,24 @@ def test_both_kinds_of_supabase_key_are_sent_the_way_supabase_expects(key, beare
 
     assert seen["apikey"] == key
     assert ("authorization" in seen) is bearer
+
+
+# --------------------------------------------------------------------------- the database address
+
+
+def test_a_database_password_pasted_as_is_still_connects_to_the_right_place():
+    from app.db import connection_params
+
+    params = connection_params(
+        '"postgresql://postgres.abcref:p@ss#w0rd!,x@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres"')
+
+    assert params == {"host": "aws-1-ap-southeast-2.pooler.supabase.com", "port": 5432, "dbname": "postgres",
+                      "user": "postgres.abcref", "password": "p@ss#w0rd!,x", "sslmode": "prefer"}
+
+
+def test_an_encoded_password_and_options_are_understood():
+    from app.db import connection_params
+
+    params = connection_params("postgresql://me:p%40ss@127.0.0.1:5544/postgres?sslmode=disable")
+
+    assert params["password"] == "p@ss" and params["port"] == 5544 and params["sslmode"] == "disable"

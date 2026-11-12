@@ -158,7 +158,7 @@ class Mailer:
                 smtp.login(self._settings.address, self._settings.app_password)
                 smtp.send_message(message)
         except smtplib.SMTPAuthenticationError as error:
-            raise MailError("The mail server rejected the login. Check FRIDAY_MAIL_APP_PASSWORD.") from error
+            raise MailError("The mail server rejected the login. Check MATCHBOOK_MAIL_APP_PASSWORD.") from error
         except smtplib.SMTPRecipientsRefused as error:
             raise MailError(f"The mail server refused the address {to_address}.") from error
         except (smtplib.SMTPException, OSError) as error:

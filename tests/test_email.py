@@ -141,7 +141,7 @@ def test_no_reply_is_sent_where_it_could_start_a_mail_loop(desk, intake, raw):
 
 
 def test_our_own_emails_and_bounces_are_ignored(desk, intake, settings):
-    for sender in (f"Friday <{APP_ADDRESS}>", "Mail Delivery Subsystem <mailer-daemon@googlemail.com>"):
+    for sender in (f"Matchbook <{APP_ADDRESS}>", "Mail Delivery Subsystem <mailer-daemon@googlemail.com>"):
         assert intake.handle(parse_email(email(sender=sender, attachments=[pdf(settings)]))) == []
 
     assert desk.store.list_runs() == [] and desk.mailer.sent == []

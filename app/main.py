@@ -99,7 +99,7 @@ def create_app(
         queue.shutdown()
         database.close()
 
-    app = FastAPI(title="Friday", description="Accounts payable invoice processing, from email to decision.",
+    app = FastAPI(title="Zamp AI Matchbook", description="Accounts payable invoice processing, from email to decision.",
                   lifespan=lifespan)
 
     @app.get("/api/health")
@@ -148,7 +148,7 @@ def create_app(
     @app.post("/api/mailbox/check", status_code=202)
     def check_mailbox() -> dict[str, str]:
         if watcher is None:
-            raise HTTPException(409, "Email isn't set up. Add FRIDAY_MAIL_ADDRESS and FRIDAY_MAIL_APP_PASSWORD.")
+            raise HTTPException(409, "Email isn't set up. Add MATCHBOOK_MAIL_ADDRESS and MATCHBOOK_MAIL_APP_PASSWORD.")
         watcher.check_soon()
         return {"status": "checking"}
 
@@ -173,7 +173,7 @@ def create_app(
 
         file_type = identify_file(data)
         if file_type is None:
-            raise HTTPException(415, "Friday reads PDF, PNG, JPEG and WebP files. This doesn't look like any of those.")
+            raise HTTPException(415, "Matchbook reads PDF, PNG, JPEG and WebP files. This doesn't look like any of those.")
         media_type, extension = file_type
         key = f"runs/{uuid4().hex}{extension}"
         try:

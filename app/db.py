@@ -10,6 +10,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Protocol, Sequence
+from urllib.parse import parse_qsl, unquote
 
 
 class Transaction(Protocol):
@@ -89,6 +90,30 @@ class SqliteDatabase:
 # --------------------------------------------------------------------------- Postgres
 
 
+def connection_params(url: str) -> dict[str, Any]:
+    """Split a postgresql:// URL into separate connection settings.
+
+    People paste database passwords as they are, with characters like # @ ! that a URL would need
+    encoded. Splitting on the LAST "@" accepts them either way. Passing the parts separately also
+    means a malformed URL can never be echoed, password and all, into an error message or a log.
+    """
+    url = url.strip().strip('"').strip("'")
+    scheme, separator, rest = url.partition("://")
+    if not separator or scheme not in ("postgres", "postgresql"):
+        raise ValueError("DATABASE_URL must start with postgresql://")
+    credentials, at, location = rest.rpartition("@")
+    location, _, query = location.partition("?")
+    address, _, dbname = location.partition("/")
+    host, _, port = address.rpartition(":") if address.count(":") == 1 else (address, "", "")
+    user, _, password = credentials.partition(":") if at else ("", "", "")
+    params: dict[str, Any] = {
+        "host": host, "port": int(port) if port else 5432, "dbname": unquote(dbname) or "postgres",
+        "user": unquote(user), "password": unquote(password), "sslmode": "prefer",
+    }
+    params.update(dict(parse_qsl(query)))
+    return {key: value for key, value in params.items() if value not in ("", None)}
+
+
 def _postgres_sql(sql: str) -> str:
     # psycopg uses %s placeholders, so any literal % must be doubled first.
     return sql.replace("%", "%%").replace("?", "%s")
@@ -119,9 +144,15 @@ class PostgresDatabase:
 
         # prepare_threshold=None: Supabase's pooler in transaction mode can't keep prepared statements.
         self._pool = ConnectionPool(
-            url, min_size=1, max_size=6, open=True, timeout=20,
-            kwargs={"row_factory": dict_row, "prepare_threshold": None},
+            "", min_size=1, max_size=6, open=False, timeout=20,
+            kwargs={**connection_params(url), "row_factory": dict_row, "prepare_threshold": None},
         )
+        try:
+            self._pool.open(wait=True, timeout=20)
+        except Exception as error:
+            self._pool.close()
+            raise ConnectionError(f"Couldn't connect to the database in DATABASE_URL ({type(error).__name__}). "
+                                  "Check the host, the password and that it is the Session pooler string.") from None
 
     @contextmanager
     def transaction(self) -> Iterator[Transaction]:

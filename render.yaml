@@ -1,7 +1,7 @@
 # Render blueprint: "New > Blueprint" in the Render dashboard, pointed at this repository.
 services:
   - type: web
-    name: friday-ap
+    name: matchbook
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
@@ -11,13 +11,13 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.7
       # Render asks for these values; they are never stored in the repository. Leave any you don't use empty.
-      - key: FRIDAY_AI_PROVIDER   # anthropic or gemini; empty picks whichever has a key
+      - key: MATCHBOOK_AI_PROVIDER   # anthropic or gemini; empty picks whichever has a key
         sync: false
       - key: GOOGLE_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: FRIDAY_MODEL         # empty uses the provider's default model
+      - key: MATCHBOOK_MODEL         # empty uses the provider's default model
         sync: false
       - key: DATABASE_URL         # Supabase session pooler connection string
         sync: false
@@ -25,9 +25,9 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: FRIDAY_MAIL_ADDRESS
+      - key: MATCHBOOK_MAIL_ADDRESS
         sync: false
-      - key: FRIDAY_MAIL_APP_PASSWORD
+      - key: MATCHBOOK_MAIL_APP_PASSWORD
         sync: false
-      - key: FRIDAY_PROCUREMENT_EMAIL
+      - key: MATCHBOOK_PROCUREMENT_EMAIL
         sync: false
