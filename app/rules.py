@@ -124,11 +124,15 @@ def validate_invoice(invoice: ExtractedInvoice, today: date, policy: Policy) -> 
             action="If it really is an invoice, process it by hand. Otherwise reject it; nothing is sent to anyone.",
         )]
 
-    missing =[_FIELD_LABELS[name] for name in _REQUIRED_FIELDS if getattr(invoice, name) is None]
-    if missing and invoice.document_quality == "poor":
+    missing_names = [name for name in _REQUIRED_FIELDS if getattr(invoice, name) is None]
+    missing = [_FIELD_LABELS[name] for name in missing_names]
+    flagged = _normalise_field_names(invoice.uncertain_fields)
+    # Absent and illegible are different problems: an invoice without a date goes back to the vendor, but
+    # a scrawled date the reader couldn't make out is for a person to read off the page.
+    if missing and (invoice.document_quality == "poor" or set(missing_names) <= flagged):
         return [Finding(
             code="UNREADABLE", status=Status.REVIEW, title="Too hard to read", halts=True,
-            message=f"The copy is too poor to read the {_join(missing)}. Nothing was guessed.",
+            message=f"The {_join(missing)} couldn't be read on this copy. Nothing was guessed.",
             action="Key it in by hand from the document, or ask the vendor for a clearer copy.",
         )]
     if missing:
@@ -144,7 +148,6 @@ def validate_invoice(invoice: ExtractedInvoice, today: date, policy: Policy) -> 
         message="Vendor, invoice number, date and total are all on the invoice.",
     )]
 
-    flagged = _normalise_field_names(invoice.uncertain_fields)
     unsure = [label for name, label in _FIELD_LABELS.items() if name in flagged]
     if unsure:
         findings.append(Finding(
@@ -157,7 +160,32 @@ def validate_invoice(invoice: ExtractedInvoice, today: date, policy: Policy) -> 
     date_finding = _check_date(invoice, today, policy)
     if date_finding:
         findings.append(date_finding)
+    paid_finding = _check_already_paid(invoice, policy)
+    if paid_finding:
+        findings.append(paid_finding)
     return findings
+
+
+def _check_already_paid(invoice: ExtractedInvoice, policy: Policy) -> Finding | None:
+    """A PAID stamp or a handwritten advance changes what is owed, even when every number adds up."""
+    paid = invoice.amount_paid
+    if not paid or paid <= policy.rounding or invoice.total is None:
+        return None
+    money = lambda amount: format_money(amount, invoice.currency)  # noqa: E731
+    if paid >= invoice.total - policy.rounding:
+        return Finding(
+            code="ALREADY_PAID", status=Status.REVIEW, title="Marked as already paid",
+            message=f"The document says the full {money(invoice.total)} has been paid. It may be a receipt "
+                    f"or a copy of an invoice that was settled.",
+            action="Check the payment records. If it was paid, reject this copy; don't pay it again.",
+        )
+    return Finding(
+        code="PART_PAID", status=Status.REVIEW, title="Part of it was paid in advance",
+        message=f"The document says {money(paid)} was already paid, so {money(invoice.total - paid)} of the "
+                f"{money(invoice.total)} is still owed.",
+        action=f"Confirm the {money(paid)} advance in the payment records, then pay only the balance.",
+        evidence={"paid": paid, "balance": round(invoice.total - paid, 2)},
+    )
 
 
 def _normalise_field_names(names: list[str]) -> set[str]:
@@ -619,7 +647,8 @@ def _check_tax_rate(invoice: ExtractedInvoice, balance: PoBalance, policy: Polic
 
 # When several things need a person, this decides which one leads the explanation.
 _REVIEW_PRIORITY = (
-    "BANK_CHANGED", "VENDOR_UNKNOWN", "TAX_ID_MISMATCH", "POSSIBLE_DUPLICATE", "OVER_PO",
+    "BANK_CHANGED", "VENDOR_UNKNOWN", "TAX_ID_MISMATCH", "ALREADY_PAID", "POSSIBLE_DUPLICATE", "OVER_PO",
+    "PART_PAID",
     "PO_WRONG_VENDOR", "PO_CLOSED", "PO_AMBIGUOUS", "PO_NOT_FOUND", "PO_INFERRED",
     "CURRENCY_MISMATCH", "TAX_RATE", "TAX_UNCLEAR", "MATH_MISMATCH", "LOW_CONFIDENCE",
 )

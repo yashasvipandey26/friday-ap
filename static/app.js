@@ -383,6 +383,7 @@ function readingNode(invoice) {
     ["Before tax", invoice.subtotal != null ? money(invoice.subtotal, currency) : "Not shown"],
     ["Tax", invoice.tax_amount != null ? money(invoice.tax_amount, currency) : taxWords[invoice.tax_treatment]],
     ["Total", money(invoice.total, currency)],
+    ["Already paid", invoice.amount_paid != null ? money(invoice.amount_paid, currency) : null],
     ["Pay to", invoice.bank_account_number
       ? `Account ending ${invoice.bank_account_number.slice(-4)}${invoice.bank_ifsc ? `, ${invoice.bank_ifsc}` : ""}` : "No bank details printed"],
     ["Copy quality", { clear: "Clear", degraded: "Readable scan", poor: "Poor" }[invoice.document_quality]],

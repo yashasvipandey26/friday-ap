@@ -33,5 +33,47 @@
     "sender": "Kaveri Office Supplies",
     "subject": "Reminder: is this invoice still pending?",
     "preview": "Our records show this October invoice as unpaid. Resending a copy for your reference."
+  },
+  {
+    "id": "sharma-stationery",
+    "file": "more/invoice_01_clean_itemised_gst_separate.pdf",
+    "sender": "Sharma Office Supplies",
+    "subject": "Tax invoice SOS/2026-27/0412 for October stationery",
+    "preview": "Please find attached our invoice for the paper, markers, staplers and binders supplied this month."
+  },
+  {
+    "id": "bluepeak-consulting",
+    "file": "more/invoice_02_clean_bundled_vat_embedded.pdf",
+    "sender": "Bluepeak Consulting Group",
+    "subject": "Invoice BPC-1187: October consulting",
+    "preview": "Attached is our all-in invoice for October. 2% discount if settled within 7 days."
+  },
+  {
+    "id": "rathore-hardware",
+    "file": "more/invoice_03_scanned_dotmatrix_itemised.pdf",
+    "sender": "Rathore & Sons Hardware",
+    "subject": "Bill no 2291 (scan)",
+    "preview": "Cement, TMT bar and binding wire bill attached. Kindly arrange payment."
+  },
+  {
+    "id": "lotus-catering",
+    "file": "more/invoice_04_missing_number_and_date.pdf",
+    "sender": "Lotus Catering Co.",
+    "subject": "Bill for the Annual Day lunch",
+    "preview": "Thank you for the order! Our bill for the lunch and tea service is attached."
+  },
+  {
+    "id": "northwind-freight-solutions",
+    "file": "more/invoice_05_missing_total.pdf",
+    "sender": "Northwind Freight Solutions",
+    "subject": "Invoice NF-88204, Rotterdam shipment",
+    "preview": "Freight invoice attached. The amount due will follow on your account statement."
+  },
+  {
+    "id": "gupta-uniforms",
+    "file": "more/invoice_06_scanned_lowres_bundled_handwritten.pdf",
+    "sender": "Gupta Tailors & Uniforms",
+    "subject": "Uniform bill",
+    "preview": "Sir, sending the bill for the staff uniforms. Advance noted on it, balance on delivery."
   }
 ]

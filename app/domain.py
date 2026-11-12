@@ -67,6 +67,7 @@ class ExtractedInvoice(BaseModel):
     tax_rate_percent: float | None = None
     tax_treatment: Literal["separate", "embedded", "none", "unclear"] = "unclear"
     total: float | None = None
+    amount_paid: float | None = None  # an advance, a part payment, or the whole total when stamped PAID
     bank_account_number: str | None = None
     bank_ifsc: str | None = None
     document_quality: Literal["clear", "degraded", "poor"] = "clear"
@@ -79,7 +80,8 @@ class ExtractedInvoice(BaseModel):
         "po_reference", "po_hint", "bank_account_number", "bank_ifsc", "notes",
         mode="before",
     )(_blank_to_none)
-    _numbers = field_validator("subtotal", "tax_amount", "tax_rate_percent", "total", mode="before")(_to_number)
+    _numbers = field_validator("subtotal", "tax_amount", "tax_rate_percent", "total", "amount_paid",
+                               mode="before")(_to_number)
 
     @field_validator("tax_treatment", "document_quality", mode="before")
     @classmethod

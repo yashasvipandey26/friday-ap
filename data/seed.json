@@ -39,6 +39,86 @@
       "bank_ifsc": "MAHB0000321",
       "phone": "+91 20 5550 0119",
       "email": "sahyadriprint@mail.example"
+    },
+    {
+      "id": "V-SHARMA",
+      "name": "Sharma Office Supplies Pvt Ltd",
+      "tax_id": "05AABCS4412K1Z7",
+      "bank_name": "HDFC Bank",
+      "bank_account": "50200041207731",
+      "bank_ifsc": "HDFC0000412",
+      "phone": "+91 135 555 0412",
+      "email": "accounts@sharmaoffice.example"
+    },
+    {
+      "id": "V-BLUEPEAK",
+      "name": "Bluepeak Consulting Group Ltd",
+      "tax_id": "GB284771206",
+      "bank_name": "Barclays",
+      "bank_account": "40918826",
+      "bank_ifsc": "204517",
+      "phone": "+44 20 5550 0118",
+      "email": "accounts@bluepeak-consulting.example"
+    },
+    {
+      "id": "V-RATHORE",
+      "name": "Rathore & Sons Hardware",
+      "tax_id": "05AAGFR2290D1ZK",
+      "bank_name": "Punjab National Bank",
+      "bank_account": "0412000100055890",
+      "bank_ifsc": "PUNB0041200",
+      "phone": "+91 1332 555 027",
+      "email": "rathoresons@mail.example"
+    },
+    {
+      "id": "V-LOTUS",
+      "name": "Lotus Catering Co.",
+      "tax_id": "",
+      "bank_name": "Bank of Baroda",
+      "bank_account": "29180200001447",
+      "bank_ifsc": "BARB0DEHRAD",
+      "phone": "+91 135 555 0233",
+      "email": "lotuscatering@mail.example"
+    },
+    {
+      "id": "V-NWFREIGHT",
+      "name": "Northwind Freight Solutions",
+      "tax_id": "",
+      "bank_name": "HSBC",
+      "bank_account": "002918273001",
+      "bank_ifsc": "HSBC0400002",
+      "phone": "+91 22 5550 0641",
+      "email": "billing@northwindfreight.example"
+    },
+    {
+      "id": "V-GUPTA",
+      "name": "Gupta Tailors & Uniforms",
+      "tax_id": "",
+      "bank_name": "State Bank of India",
+      "bank_account": "38291047756",
+      "bank_ifsc": "SBIN0000612",
+      "phone": "+91 1332 555 087",
+      "email": "guptatailors@mail.example"
+    },
+    {
+      "id": "V-SLICED",
+      "name": "DEMO - Sliced Invoices",
+      "tax_id": "",
+      "bank_name": "ANZ Bank",
+      "bank_account": "12341234",
+      "bank_ifsc": "4321432",
+      "phone": "+61 3 5550 0112",
+      "email": "admin@slicedinvoices.com"
+    },
+    {
+      "id": "V-RENTOMOJO",
+      "name": "Rentomojo Limited",
+      "tax_id": "09AADCE0327Q1ZE",
+      "bank_name": "ICICI Bank",
+      "bank_account": "000705034521",
+      "bank_ifsc": "ICIC0000007",
+      "phone": "+91 80 5550 0190",
+      "email": "billing@rentomojo.example"
     }
   ],
   "purchase_orders": [
@@ -135,6 +215,136 @@
       "owner_email": "kavya.rao@meridianretail.example",
       "lines": [
         {"description": "A4 tri-fold brochure, 130 gsm art paper, four colour printing", "quantity": 5000, "unit_price": 17.2, "amount": 86000}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0450",
+      "vendor_id": "V-SHARMA",
+      "description": "Office stationery for the Dehradun office, October",
+      "currency": "INR",
+      "amount": 19105,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-09-28",
+      "owner_name": "Meera Iyer, Admin",
+      "owner_email": "meera.iyer@meridianretail.example",
+      "lines": [
+      {"description": "A4 copier paper 75 gsm, reams", "quantity": 40, "unit_price": 285, "amount": 11400},
+      {"description": "Whiteboard markers, box of 10", "quantity": 12, "unit_price": 190, "amount": 2280},
+      {"description": "Heavy duty stapler", "quantity": 5, "unit_price": 425, "amount": 2125},
+      {"description": "Ring binder 2D A4", "quantity": 30, "unit_price": 110, "amount": 3300}
+      ]
+    },
+    {
+      "po_number": "PO-5521-HA",
+      "vendor_id": "V-BLUEPEAK",
+      "description": "Strategy consulting retainer, October 2026",
+      "currency": "GBP",
+      "amount": 4000,
+      "tax_rate_percent": 20,
+      "status": "open",
+      "order_date": "2026-09-15",
+      "owner_name": "Neha Kapoor, Strategy",
+      "owner_email": "neha.kapoor@meridianretail.example",
+      "lines": [
+      {"description": "Consulting services: discovery workshops, stakeholder interviews, strategy deck and month-end support", "quantity": 1, "unit_price": 4000, "amount": 4000}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0455",
+      "vendor_id": "V-RATHORE",
+      "description": "Cement, TMT bars and binding wire for the Roorkee store fit-out",
+      "currency": "INR",
+      "amount": 56350,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-10-10",
+      "owner_name": "Vikram Joshi, Projects",
+      "owner_email": "vikram.joshi@meridianretail.example",
+      "lines": [
+      {"description": "OPC 53 grade cement, 50 kg bags", "quantity": 60, "unit_price": 395, "amount": 23700},
+      {"description": "TMT bar 12 mm, per kg", "quantity": 450, "unit_price": 68, "amount": 30600},
+      {"description": "Binding wire, per kg", "quantity": 25, "unit_price": 82, "amount": 2050}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0460",
+      "vendor_id": "V-LOTUS",
+      "description": "Annual Day lunch catering, 120 guests",
+      "currency": "INR",
+      "amount": 50300,
+      "tax_rate_percent": 5,
+      "status": "open",
+      "order_date": "2026-10-01",
+      "owner_name": "Kavya Rao, Marketing",
+      "owner_email": "kavya.rao@meridianretail.example",
+      "lines": [
+      {"description": "Veg lunch buffet, per plate", "quantity": 120, "unit_price": 350, "amount": 42000},
+      {"description": "Tea and coffee service, per head", "quantity": 120, "unit_price": 40, "amount": 4800},
+      {"description": "Setup, crockery and service staff", "quantity": 1, "unit_price": 3500, "amount": 3500}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0462",
+      "vendor_id": "V-NWFREIGHT",
+      "description": "Ocean freight, Nhava Sheva to Rotterdam, October shipment",
+      "currency": "USD",
+      "amount": 3937.5,
+      "tax_rate_percent": 0,
+      "status": "open",
+      "order_date": "2026-10-05",
+      "owner_name": "Rohit Sinha, Supply chain",
+      "owner_email": "rohit.sinha@meridianretail.example",
+      "lines": [
+      {"description": "Ocean freight, 1 x 40 ft HC container", "quantity": 1, "unit_price": 3250, "amount": 3250},
+      {"description": "Bunker adjustment factor", "quantity": 1, "unit_price": 412.5, "amount": 412.5},
+      {"description": "Documentation fee", "quantity": 1, "unit_price": 85, "amount": 85},
+      {"description": "Customs clearance at origin", "quantity": 1, "unit_price": 190, "amount": 190}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0466",
+      "vendor_id": "V-GUPTA",
+      "description": "Staff uniforms, 25 sets of shirt and trouser",
+      "currency": "INR",
+      "amount": 34524,
+      "tax_rate_percent": 5,
+      "status": "open",
+      "order_date": "2026-10-12",
+      "owner_name": "Priya Nair, HR",
+      "owner_email": "priya.nair@meridianretail.example",
+      "lines": [
+      {"description": "Staff uniform set, shirt and trouser, stitching and fabric", "quantity": 25, "unit_price": 1380.96, "amount": 34524}
+      ]
+    },
+    {
+      "po_number": "12345",
+      "vendor_id": "V-SLICED",
+      "description": "Website design",
+      "currency": "USD",
+      "amount": 85,
+      "tax_rate_percent": 10,
+      "status": "open",
+      "order_date": "2016-01-20",
+      "owner_name": "Kavya Rao, Marketing",
+      "owner_email": "kavya.rao@meridianretail.example",
+      "lines": [
+      {"description": "Web design", "quantity": 1, "unit_price": 85, "amount": 85}
+      ]
+    },
+    {
+      "po_number": "PO-2026-0470",
+      "vendor_id": "V-RENTOMOJO",
+      "description": "Water purifier rental, June 2026",
+      "currency": "INR",
+      "amount": 193.9,
+      "tax_rate_percent": 18,
+      "status": "open",
+      "order_date": "2026-06-01",
+      "owner_name": "Priya Nair, HR",
+      "owner_email": "priya.nair@meridianretail.example",
+      "lines": [
+      {"description": "Water purifier with mineral enhancer, monthly rent", "quantity": 1, "unit_price": 193.9, "amount": 193.9}
       ]
     }
   ],

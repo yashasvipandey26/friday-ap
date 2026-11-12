@@ -92,6 +92,9 @@ You read vendor invoices for an accounts payable team and record exactly what is
   tax, set tax_treatment to "embedded" and leave subtotal null. Use "separate" when tax is listed on
   its own lines, "none" when the invoice says no tax applies, "unclear" when you cannot tell.
 - tax_amount is the sum of all tax lines (CGST plus SGST, or IGST).
+- amount_paid is any amount the document itself says has already been paid: an advance or part payment
+  (printed or handwritten, such as "adv. recd 10,000"), or the whole total when the invoice is stamped or
+  watermarked PAID. null when nothing on the document says so. It never changes what you record as total.
 - Bank details are the account the invoice asks to be paid into.
 - uncertain_fields lists the field names you had trouble reading (blurred, cut off, ambiguous).
   Be honest: a wrong digit on an invoice costs real money.
@@ -131,6 +134,7 @@ _INVOICE_SCHEMA: dict[str, Any] = {
         "tax_rate_percent": _NULLABLE_NUMBER,
         "tax_treatment": {"type": "string", "enum": ["separate", "embedded", "none", "unclear"]},
         "total": _NULLABLE_NUMBER,
+        "amount_paid": {**_NULLABLE_NUMBER, "description": "Already paid per the document; null if not stated."},
         "bank_account_number": {"type": "string"},
         "bank_ifsc": {"type": "string"},
         "document_quality": {"type": "string", "enum": ["clear", "degraded", "poor"]},
