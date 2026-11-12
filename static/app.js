@@ -2,7 +2,7 @@
 // Everything that comes from an invoice is written with textContent (via el), never as HTML.
 
 const view = document.getElementById("view");
-const state = { liveRunId: null, cameFrom: "inbox", stopWatching: () => {}, runFilter: "all" };
+const state = { liveRunId: null, cameFrom: "inbox", stopWatching: () => {}, runFilter: "all", health: null };
 
 // ---------------------------------------------------------------- small helpers
 
@@ -65,13 +65,23 @@ const OUTCOMES = {
   rejected: { tone: "reject", label: "Rejected", stamp: "Rejected" },
 };
 
+const isActive = (run) => run.status === "running" || run.status === "queued";
+
 function outcomeOf(run) {
+  if (run.status === "queued") return { tone: "running", label: "Waiting to start" };
   if (run.status === "running") return { tone: "running", label: "Checking" };
   if (run.status === "failed") return { tone: "reject", label: "Stopped" };
   if (run.resolution === "approved") return { tone: "pass", label: "Approved by a reviewer" };
   if (run.resolution === "rejected") return { tone: "reject", label: "Rejected by a reviewer" };
   if (run.resolution === "closed") return { tone: "pending", label: "Closed, not decided" };
   return OUTCOMES[run.outcome] || { tone: "pending", label: "" };
+}
+
+// Redraws a page every few seconds while it is open, so email arriving in the background shows up.
+function refreshEvery(ms, redraw) {
+  let stopped = false;
+  const timer = setInterval(() => { if (!stopped) redraw().catch(() => {}); }, ms);
+  state.stopWatching = () => { stopped = true; clearInterval(timer); };
 }
 
 // ---------------------------------------------------------------- routing
@@ -128,18 +138,69 @@ async function showInbox() {
       el("a", { class: "mail-attachment", href: `/api/samples/${sample.id}/file`, target: "_blank", rel: "noopener",
         title: `Open ${sample.file} in a new tab` }, "View PDF")));
 
+  const mailbox = el("section", { class: "mailbox", "aria-live": "polite" });
   view.replaceChildren(
     el("div", { class: "intake" },
       el("section", { class: "intake-lede" },
-        el("h1", {}, "Drop in an invoice and watch every check happen."),
+        el("h1", {}, "Email an invoice in, or drop one here, and watch every check happen."),
         el("p", {}, "Friday reads the document, checks it against the approved vendors and open purchase orders, " +
-          "and tells you whether to pay it. Each step is shown as it runs, and the reason comes in plain English."),
+          "and decides whether to pay it. Each step is shown as it runs, the reason comes in plain English, " +
+          "and whoever needs to know is emailed."),
+        mailbox,
         dropzone),
       el("section", { class: "inbox" },
-        el("h2", {}, "Or open one from this morning's inbox"),
+        el("h2", {}, "Or open one from this morning's sample inbox"),
         el("ul", { class: "mail-list" }, mails),
         el("p", { class: "fine-print" }, "Five vendor emails with invoices attached. Each one goes through exactly the same " +
-          "process as a file you upload."))));
+          "process as a real email or a file you upload."))));
+
+  const drawMailbox = async () => mailbox.replaceChildren(...mailboxNodes(await api("/api/mailbox")));
+  await drawMailbox().catch((error) => mailbox.replaceChildren(el("p", { class: "mailbox-error" }, error.message)));
+  refreshEvery(5000, drawMailbox);
+}
+
+const EMAIL_STATUS = {
+  received: { tone: "running", label: "Taking it in" },
+  processed: { tone: "pass", label: "Invoice sent for checking" },
+  no_invoice: { tone: "review", label: "No invoice attached" },
+  ignored: { tone: "pending", label: "Ignored" },
+  failed: { tone: "reject", label: "Couldn't take it in" },
+};
+
+function mailboxNodes(box) {
+  if (!box.enabled) {
+    return [el("p", { class: "fine-print mailbox-off" }, "Email intake is off. Set FRIDAY_MAIL_ADDRESS and " +
+      "FRIDAY_MAIL_APP_PASSWORD on the server to have invoices emailed straight in.")];
+  }
+  const check = el("button", { class: "button quiet small", type: "button" }, "Check now");
+  check.addEventListener("click", async () => {
+    try { await postJson("/api/mailbox/check", {}); check.textContent = "Checking…"; } catch (error) { toast(error.message); }
+  });
+  const health = box.last_error
+    ? el("p", { class: "mailbox-error" }, box.last_error)
+    : el("p", { class: "fine-print" }, box.last_checked
+      ? `Checked ${moment(box.last_checked)}, every ${box.poll_seconds} s. ` +
+        (box.send_mode === "auto" ? "Replies go out automatically." : "Replies wait for a person to press Send.")
+      : "Connecting to the mailbox…");
+  const rows = box.emails.map((email) => {
+    const status = EMAIL_STATUS[email.status] || { tone: "pending", label: email.status };
+    const sent = email.messages.filter((message) => message.status === "sent").length;
+    return el("li", { class: "mail-row" },
+      el("span", { class: "mail-sender" }, email.from_name || email.from_address),
+      el("span", { class: "mail-subject" }, email.subject || "(no subject)"),
+      el("span", { class: `outcome tone-${status.tone}` }, status.label),
+      el("span", { class: "mail-runs" },
+        email.runs.map((run) => el("a", { href: `#run-${run.id}` }, `Run #${run.id}`)),
+        sent ? el("span", { class: "fine-print" }, `${sent} repl${sent === 1 ? "y" : "ies"} sent`) : null),
+      email.note && el("span", { class: "fine-print mail-note" }, email.note));
+  });
+  return [
+    el("div", { class: "mailbox-head" },
+      el("p", {}, "Send invoices to ", el("strong", { class: "address" }, box.address)),
+      check),
+    health,
+    rows.length ? el("ul", { class: "mail-rows" }, rows) : el("p", { class: "fine-print" }, "No email yet. Send one with an invoice attached."),
+  ];
 }
 
 async function startRun({ file, sampleId }) {
@@ -166,6 +227,7 @@ const WORKING = {
   match: "Looking for the purchase order",
   amounts: "Comparing with what is left on the PO",
   decide: "Deciding",
+  notify: "Sending emails",
 };
 const ACTORS = { ai: "AI", rules: "Rules" };
 const MARKS = { pass: "✓", note: "✓", review: "!", reject: "×", skipped: "–" };
@@ -180,6 +242,7 @@ async function showRun(id) {
   const verdict = el("div", { class: "verdict" });
   const back = state.cameFrom === "runs" ? { href: "#runs", text: "Back to runs" } : { href: "#inbox", text: "Back to the inbox" };
   const isPdf = run.media_type === "application/pdf";
+  const storedLabel = state.health?.storage === "supabase" ? "Open the copy kept in cloud storage" : "Open the original in a new tab";
 
   view.replaceChildren(
     el("div", { class: "run" },
@@ -187,18 +250,30 @@ async function showRun(id) {
         el("a", { class: "back", href: back.href }, back.text),
         el("h1", {}, run.filename),
         el("p", { class: "fine-print" }, `Run ${run.id}, received ${moment(run.created_at)}`),
+        sourceNode(run),
         status),
       el("div", { class: "run-body" },
         el("aside", { class: "document" },
           isPdf
             ? el("iframe", { src: `${run.file_url}#toolbar=0&navpanes=0&view=FitH`, title: "The invoice as received" })
             : el("img", { src: run.file_url, alt: "The invoice as received" }),
-          el("a", { class: "fine-print", href: run.file_url, target: "_blank", rel: "noopener" }, "Open the original in a new tab")),
+          el("a", { class: "fine-print", href: run.stored_url, target: "_blank", rel: "noopener" }, storedLabel)),
         el("section", { class: "working", "aria-label": "The checks" }, stages, verdict))));
 
   const frame = { status, stages, verdict };
-  if (live || run.status === "running") watchRun(id, frame);
+  if (live || isActive(run)) watchRun(id, frame);
   else paintRun(run, frame, { revealed: run.stages.length, live: false });
+}
+
+function sourceNode(run) {
+  if (run.email) {
+    const who = run.email.from_name ? `${run.email.from_name} <${run.email.from_address}>` : run.email.from_address;
+    return el("p", { class: "source" }, el("span", { class: "actor" }, "Email"), " From ", el("strong", {}, who),
+      run.email.subject ? ` · “${run.email.subject}”` : "");
+  }
+  const label = run.source === "sample" ? "Sample" : "Upload";
+  return el("p", { class: "source" }, el("span", { class: "actor" }, label),
+    run.source === "sample" ? " From the sample inbox" : " Uploaded in the browser");
 }
 
 function watchRun(id, frame) {
@@ -212,14 +287,14 @@ function watchRun(id, frame) {
   const tick = async () => {
     if (stopped) return;
     try {
-      if (!latest || latest.status === "running") latest = await api(`/api/runs/${id}`);
+      if (!latest || isActive(latest)) latest = await api(`/api/runs/${id}`);
     } catch (error) {
       frame.status.textContent = `Lost contact with the server: ${error.message}`;
       return;
     }
     const next = latest.stages[revealed];
     if (next && (next.state === "done" || next.state === "skipped")) revealed += 1;
-    const finished = latest.status !== "running" && revealed >= latest.stages.length;
+    const finished = !isActive(latest) && revealed >= latest.stages.length;
     paintRun(latest, frame, { revealed, live: true, finished });
     if (!finished) setTimeout(tick, 430);
   };
@@ -246,7 +321,8 @@ function paintRun(run, frame, { revealed, live, finished = true }) {
   if (run.status === "failed" || !run.decision) {
     frame.verdict.append(el("section", { class: "decision tone-reject" },
       el("h2", {}, "This run stopped unexpectedly"),
-      el("p", {}, "Nothing was decided and nothing was recorded. Run the invoice again; if it stops again, process it by hand.")));
+      el("p", {}, "Nothing was decided and nothing was recorded. Run the invoice again; if it stops again, process it by hand."),
+      retryNode(run)));
     return;
   }
   frame.verdict.append(decisionCard(run, live, frame));
@@ -355,8 +431,72 @@ function decisionCard(run, live, frame) {
         ? "Written by AI from the checks above. The decision itself came from the rules."
         : "Written from a template because the AI writer was not available."),
     ],
-    explanation?.message && draftNode(explanation.message),
+    run.messages?.length ? run.messages.map(messageNode) : (explanation?.message && draftNode(explanation.message)),
+    retryNode(run),
     resolutionNode(run, frame));
+}
+
+const RETRYABLE = new Set(["READ_FAILED", "STEP_FAILED"]);
+
+function retryNode(run) {
+  if (run.resolution) return null;
+  if (run.status !== "failed" && !RETRYABLE.has(run.decision?.primary_code)) return null;
+  const again = el("button", { class: "button", type: "button" }, "Run it again");
+  again.addEventListener("click", async () => {
+    try {
+      const { id } = await api(`/api/runs/${run.id}/retry`, { method: "POST" });
+      state.liveRunId = id;
+      location.hash = `run-${id}`;
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  return el("div", { class: "review" },
+    el("p", { class: "fine-print" }, "The document couldn't be checked this time, usually because the AI service was busy. " +
+      "Running it again starts a fresh run on the same file."),
+    el("div", { class: "review-actions" }, again));
+}
+
+const MESSAGE_STATUS = {
+  sent: { tone: "pass", label: "Sent" },
+  draft: { tone: "running", label: "Draft" },
+  held: { tone: "pending", label: "Not sent" },
+  failed: { tone: "reject", label: "Failed" },
+};
+
+function messageNode(message) {
+  const status = MESSAGE_STATUS[message.status] || { tone: "pending", label: message.status };
+  const heading = message.kind === "vendor" ? "Email to the vendor" : "Note to the PO owner";
+  const container = el("div", { class: `draft message-${message.status}` });
+  const draw = (current) => {
+    const state_ = MESSAGE_STATUS[current.status] || status;
+    const copy = el("button", { class: "button quiet small", type: "button" }, "Copy");
+    copy.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(`To: ${current.to_address || ""}\nSubject: ${current.subject}\n\n${current.body}`);
+      copy.textContent = "Copied";
+    });
+    const canSend = (current.status === "draft" || current.status === "failed") && current.to_address && state.health?.mail?.send_mode !== "off";
+    const send = canSend && el("button", { class: "button small", type: "button" }, current.status === "failed" ? "Try again" : "Send");
+    if (send) {
+      send.addEventListener("click", async () => {
+        send.disabled = true;
+        try { draw(await postJson(`/api/messages/${current.id}/send`, {})); } catch (error) { toast(error.message); send.disabled = false; }
+      });
+    }
+    container.className = `draft message-${current.status}`;
+    container.replaceChildren(
+      el("div", { class: "draft-head" },
+        el("h3", {}, heading, " ", el("span", { class: `outcome tone-${state_.tone}` },
+          current.status === "sent" ? `Sent ${moment(current.sent_at)}` : state_.label)),
+        el("div", { class: "review-actions" }, send, copy)),
+      current.to_address && el("p", { class: "fine-print" }, `To ${current.to_name ? `${current.to_name} <${current.to_address}>` : current.to_address}`,
+        current.in_reply_to ? ", as a reply in the same thread" : ""),
+      current.reason && current.status !== "sent" && el("p", { class: "message-reason" }, current.reason),
+      el("p", { class: "draft-subject" }, current.subject),
+      el("p", { class: "draft-body" }, current.body));
+  };
+  draw(message);
+  return container;
 }
 
 function draftNode(message) {
@@ -370,7 +510,7 @@ function draftNode(message) {
       el("h3", {}, message.to === "vendor" ? "Draft email to the vendor" : "Draft note to the PO owner"), copy),
     el("p", { class: "draft-subject" }, message.subject),
     el("p", { class: "draft-body" }, message.body),
-    el("p", { class: "fine-print" }, "A draft for a person to check and send. Friday sends nothing on its own."));
+    el("p", { class: "fine-print" }, "A draft for a person to check and send."));
 }
 
 function resolutionNode(run, frame) {
@@ -381,6 +521,12 @@ function resolutionNode(run, frame) {
   }
   if (run.outcome !== "needs_review") return null;
 
+  // The same conditions the server enforces, so approval isn't offered when it would be refused.
+  const approvalBlocked = !run.vendor_id
+    ? "Approval is off because this vendor isn't on the approved list. Onboard them, then resubmit the invoice."
+    : (run.total == null || !run.invoice_number || !run.invoice_date)
+      ? "Approval is off because key details couldn't be read. Key this invoice in by hand."
+      : null;
   const note = el("input", { type: "text", id: "review-note", placeholder: "What did you check? (optional)", maxlength: "300" });
   const resolve = async (approve) => {
     try {
@@ -396,8 +542,10 @@ function resolutionNode(run, frame) {
     el("label", { class: "fine-print", for: "review-note" }, "The process stops here until a person decides. Your decision and note are kept with the run."),
     note,
     el("div", { class: "review-actions" },
-      el("button", { class: "button", type: "button", onclick: () => resolve(true) }, "Approve for payment"),
-      el("button", { class: "button quiet", type: "button", onclick: () => resolve(false) }, "Reject invoice")));
+      el("button", { class: "button", type: "button", disabled: Boolean(approvalBlocked), onclick: () => resolve(true) },
+        "Approve for payment"),
+      el("button", { class: "button quiet", type: "button", onclick: () => resolve(false) }, "Reject invoice")),
+    approvalBlocked && el("p", { class: "fine-print" }, approvalBlocked));
 }
 
 // ---------------------------------------------------------------- runs: the dashboard
@@ -412,6 +560,12 @@ const FILTERS = [
 async function showRuns() {
   state.cameFrom = "runs";
   const { stats, runs } = await api("/api/runs");
+  let signature = JSON.stringify(runs.map((run) => [run.id, run.status, run.outcome, run.resolution]));
+  refreshEvery(5000, async () => {  // new email or finished runs appear without a reload
+    const latest = await api("/api/runs");
+    const next = JSON.stringify(latest.runs.map((run) => [run.id, run.status, run.outcome, run.resolution]));
+    if (next !== signature && location.hash === "#runs") { signature = next; state.stopWatching(); await showRuns(); }
+  });
 
   if (!runs.length) {
     view.replaceChildren(el("div", { class: "page" },
@@ -430,6 +584,7 @@ async function showRuns() {
     [stats.rejected, "rejected"],
     [money(stats.approved_value), "approved for payment"],
     [stats.median_seconds != null ? `${stats.median_seconds} s` : "", "typical time per invoice"],
+    [stats.by_email, "arrived by email"],
   ];
   const rows = el("tbody");
   const filters = el("div", { class: "filters", role: "group", "aria-label": "Filter runs" });
@@ -441,7 +596,7 @@ async function showRuns() {
       onclick: () => { state.runFilter = filter.key; draw(); },
     }, `${filter.label} (${runs.filter(filter.test).length})`)));
     const visible = runs.filter(active.test);
-    rows.replaceChildren(...(visible.length ? visible.map(runRow) : [el("tr", {}, el("td", { colspan: "9", class: "none" }, "No runs match this filter."))]));
+    rows.replaceChildren(...(visible.length ? visible.map(runRow) : [el("tr", {}, el("td", { colspan: "10", class: "none" }, "No runs match this filter."))]));
   };
   draw();
 
@@ -451,8 +606,8 @@ async function showRuns() {
     filters,
     el("div", { class: "table-scroll" },
       el("table", { class: "ledger" },
-        el("thead", {}, el("tr", {}, ["Run", "Received", "Vendor", "Invoice", "Amount", "PO", "Outcome", "Why", "Took"]
-          .map((heading, index) => el("th", { class: index === 4 || index === 8 ? "num" : null }, heading)))),
+        el("thead", {}, el("tr", {}, ["Run", "Received", "From", "Vendor", "Invoice", "Amount", "PO", "Outcome", "Why", "Took"]
+          .map((heading, index) => el("th", { class: index === 5 || index === 9 ? "num" : null }, heading)))),
         rows))));
 }
 
@@ -461,6 +616,7 @@ function runRow(run) {
   return el("tr", { class: "clickable", onclick: () => { location.hash = `run-${run.id}`; } },
     el("td", {}, el("a", { href: `#run-${run.id}` }, `#${run.id}`)),
     el("td", { class: "nowrap" }, moment(run.created_at)),
+    el("td", { class: "source-cell" }, run.source === "email" ? `Email · ${run.email_from || ""}` : run.source === "sample" ? "Sample" : "Upload"),
     el("td", {}, run.vendor_name || run.filename),
     el("td", { class: "nowrap" }, run.invoice_number || ""),
     el("td", { class: "num" }, money(run.total, run.currency)),
@@ -481,7 +637,7 @@ async function showOrders() {
     return el("tr", {},
       el("td", { class: "nowrap" }, el("strong", {}, order.po_number)),
       el("td", {}, order.vendor_name),
-      el("td", {}, order.description),
+      el("td", {}, order.description, order.owner_name ? el("span", { class: "fine-print block" }, `Raised by ${order.owner_name}`) : null),
       el("td", { class: "num" }, money(order.amount, order.currency)),
       el("td", {},
         el("span", { class: "meter", role: "img", "aria-label": `${used}% billed` }, el("span", { style: `width:${used}%` })),
@@ -540,10 +696,16 @@ async function showOrders() {
 // ---------------------------------------------------------------- start
 
 api("/api/health").then((health) => {
+  state.health = health;
   const status = document.getElementById("ai-status");
   status.textContent = health.ai_ready ? "AI reader ready" : "AI reader is not set up";
-  status.title = health.ai_ready ? `Reading with ${health.model}` : `Set ${health.key_name} on the server and restart.`;
+  status.title = health.ai_ready
+    ? `Reading with ${health.model}${health.fallback_model ? `, backed up by ${health.fallback_model}` : ""}. ` +
+      `Runs kept in ${health.database === "postgres" ? "Postgres" : "SQLite"}, files in ${health.storage === "supabase" ? "Supabase Storage" : "a local folder"}.`
+    : `Set ${health.key_name} on the server and restart.`;
   status.classList.add(health.ai_ready ? "is-ready" : "is-missing");
-}).catch(() => {});
-
-route();
+  const mail = document.getElementById("mail-status");
+  mail.textContent = health.mail.enabled ? "Inbox connected" : "Inbox off";
+  mail.title = health.mail.enabled ? `Watching ${health.mail.address}` : "Set FRIDAY_MAIL_ADDRESS and FRIDAY_MAIL_APP_PASSWORD to receive invoices by email.";
+  mail.classList.add(health.mail.enabled && !health.mail.last_error ? "is-ready" : "is-missing");
+}).catch(() => {}).finally(route);

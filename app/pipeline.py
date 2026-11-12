@@ -2,6 +2,9 @@
 
 Adding a check means writing one method and adding one line to the stage list. The orchestration
 (progress, timing, stopping early, surviving a crashed stage) is written once, in `run`.
+
+A run can be started again after the app restarts part-way through it, so every step is safe to
+repeat: nothing is recorded until the decision, and recording the same invoice twice is refused.
 """
 from __future__ import annotations
 
@@ -10,7 +13,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import date
-from pathlib import Path
 from typing import Any, Callable
 
 from pypdf import PdfReader
@@ -25,11 +27,14 @@ from .domain import (
     Finding,
     LedgerEntry,
     Outcome,
+    PoBalance,
     StageProgress,
     Status,
     Vendor,
     reference_key,
 )
+from .files import FileStore
+from .outbox import Outbox
 from .rules import PoMatch, format_money
 from .store import Store, utc_now
 
@@ -48,9 +53,10 @@ class RunContext:
     """What the stages learn about one invoice as they go."""
 
     run_id: int
-    document_path: Path
+    file_key: str
     filename: str
     media_type: str
+    email_id: int | None
     today: date
     document: Document | None = None
     invoice: ExtractedInvoice | None = None
@@ -80,11 +86,14 @@ class ResolutionError(Exception):
 
 
 class InvoicePipeline:
-    def __init__(self, store: Store, reader: InvoiceReader, explainer: Explainer, settings: Settings) -> None:
+    def __init__(self, store: Store, reader: InvoiceReader, explainer: Explainer, settings: Settings,
+                 files: FileStore, outbox: Outbox) -> None:
         self._store = store
         self._reader = reader
         self._explainer = explainer
         self._settings = settings
+        self._files = files
+        self._outbox = outbox
         self._policy = settings.policy
         self._stages = (
             Stage("receive", "Receive the file", "system", self._receive),
@@ -102,15 +111,18 @@ class InvoicePipeline:
         started = time.perf_counter()
         record = self._store.get_run(run_id)
         ctx = RunContext(
-            run_id=run_id, document_path=Path(record["file_path"]), filename=record["filename"],
-            media_type=record["media_type"], today=date.today(),
+            run_id=run_id, file_key=record["file_key"], filename=record["filename"],
+            media_type=record["media_type"], email_id=record["email_id"], today=date.today(),
         )
         progress = [StageProgress(key=stage.key, title=stage.title, actor=stage.actor) for stage in self._stages]
         progress.append(StageProgress(key="decide", title="Decide and explain", actor="rules"))
+        progress.append(StageProgress(key="notify", title="Tell whoever needs to know", actor="system"))
+        self._store.update_run(run_id, status="running")
 
         try:
             self._run_checks(ctx, progress)
             decision, explanation = self._decide(ctx, progress)
+            self._notify(ctx, decision, explanation, progress)
             self._save_result(ctx, decision, explanation, progress, started)
         except Exception:
             logger.exception("Run %s failed", run_id)
@@ -118,7 +130,7 @@ class InvoicePipeline:
 
     def _run_checks(self, ctx: RunContext, progress: list[StageProgress]) -> None:
         settled_early = False
-        for stage, row in zip(self._stages, progress):
+        for stage, row in zip(self._stages, progress):  # the last two rows, decide and notify, run after
             if settled_early:
                 row.state, row.summary = "skipped", "Not run, because an earlier step already decided the outcome."
                 continue
@@ -145,25 +157,63 @@ class InvoicePipeline:
         self._store.save_progress(ctx.run_id, progress)
 
     def _decide(self, ctx: RunContext, progress: list[StageProgress]) -> tuple[Decision, Explanation]:
-        row = progress[-1]
+        row = progress[-2]
         row.state = "running"
         self._store.save_progress(ctx.run_id, progress)
         clock = time.perf_counter()
 
         decision = rules.decide(ctx.findings, self._po_number(ctx))
+        if decision.outcome is Outcome.APPROVED and not self._record(ctx):
+            # Another copy of this invoice was recorded between the duplicate check and now.
+            ctx.findings.append(Finding(
+                code="DUPLICATE", status=Status.REJECT, title="Duplicate invoice", notify="vendor",
+                message=f"Invoice {ctx.invoice.invoice_number} was recorded by another run a moment ago.",
+                action="Don't pay it twice. Let the vendor know the invoice is already recorded.",
+            ))
+            decision = rules.decide(ctx.findings, self._po_number(ctx))
+
         try:
             explanation = self._explainer.explain(ctx.invoice, decision)
         except Exception:  # wording is never allowed to block a decision
             logger.exception("Write-up failed on run %s", ctx.run_id)
             explanation = TemplateExplainer(self._settings.company_name).explain(ctx.invoice, decision)
 
-        if decision.outcome is Outcome.APPROVED:
-            self._store.record_invoice(self._ledger_entry(ctx))
-
         row.duration_ms = round((time.perf_counter() - clock) * 1000)
         row.state, row.summary = "done", decision.headline
         row.details = {"outcome": decision.outcome.value, "written_by": explanation.written_by}
         return decision, explanation
+
+    def _record(self, ctx: RunContext) -> bool:
+        """Record an approved invoice. A run resumed after a restart may find its own entry already there."""
+        if self._store.record_invoice(self._ledger_entry(ctx)):
+            return True
+        existing = self._store.recorded_invoice(ctx.vendor.id, ctx.invoice.invoice_number)
+        return existing is not None and existing.run_id == ctx.run_id
+
+    def _notify(self, ctx: RunContext, decision: Decision, explanation: Explanation,
+                progress: list[StageProgress]) -> None:
+        row = progress[-1]
+        row.state = "running"
+        self._store.save_progress(ctx.run_id, progress)
+        clock = time.perf_counter()
+        try:
+            messages = self._outbox.notify(
+                run_id=ctx.run_id, draft=explanation.message, findings=ctx.findings, vendor=ctx.vendor,
+                po=ctx.po_match.balance.po if ctx.po_match and ctx.po_match.balance else None, email_id=ctx.email_id,
+            )
+            row.findings = [_message_finding(message) for message in messages]
+            if messages:
+                row.summary = " ".join(f"{finding.title}." for finding in row.findings)
+            elif any(finding.code == "BANK_CHANGED" for finding in ctx.findings):
+                row.summary = ("Nobody is emailed: the bank details changed, so the reviewer phones the vendor "
+                               "on the number already on file instead.")
+            else:
+                row.summary = "No one needs to be told."
+        except Exception as error:  # a mail problem never undoes a decision
+            logger.exception("Notifying failed on run %s", ctx.run_id)
+            row.summary = f"Couldn't prepare the email ({type(error).__name__}). The decision stands."
+        row.duration_ms = round((time.perf_counter() - clock) * 1000)
+        row.state = "done"
 
     def _save_result(self, ctx: RunContext, decision: Decision, explanation: Explanation,
                      progress: list[StageProgress], started: float) -> None:
@@ -177,6 +227,7 @@ class InvoicePipeline:
             decision=decision.model_dump(mode="json"),
             explanation=explanation.model_dump(mode="json"),
             outcome=decision.outcome.value,
+            headline=decision.headline,
             vendor_id=ctx.vendor.id if ctx.vendor else None,
             vendor_name=ctx.vendor.name if ctx.vendor else (invoice.vendor_name if invoice else None),
             invoice_number=invoice.invoice_number if invoice else None,
@@ -192,7 +243,7 @@ class InvoicePipeline:
     # ----------------------------------------------------------------- the stages
 
     def _receive(self, ctx: RunContext) -> StageOutput:
-        data = ctx.document_path.read_bytes()
+        data = self._files.load(ctx.file_key)
         size = f"{len(data) / 1024:.0f} KB"
         pages, kind = 1, "image"
 
@@ -246,6 +297,8 @@ class InvoicePipeline:
             _TAX_PHRASES[invoice.tax_treatment],
             f"It quotes {invoice.po_reference}." if invoice.po_reference else "It doesn't quote a PO number.",
         ]
+        if invoice.read_by and invoice.read_by != self._settings.model:
+            sentences.append(f"The main model was busy, so the backup model ({invoice.read_by}) read it.")
         if invoice.document_quality != "clear":
             sentences.append("The copy is a readable scan." if invoice.document_quality == "degraded"
                              else "Parts of the page couldn't be read.")
@@ -259,19 +312,22 @@ class InvoicePipeline:
         return _from_findings(findings)
 
     def _look_for_duplicates(self, ctx: RunContext) -> StageOutput:
+        # A run resumed after a restart must not find itself: leave out anything this run already wrote.
         return _from_findings(rules.find_duplicates(
             ctx.invoice, ctx.vendor,
-            recorded=self._store.ledger(ctx.vendor.id),
-            queued=self._store.invoices_waiting_for_review(ctx.vendor.id),
+            recorded=[entry for entry in self._store.ledger(ctx.vendor.id) if entry.run_id != ctx.run_id],
+            queued=[item for item in self._store.invoices_waiting_for_review(ctx.vendor.id) if item.run_id != ctx.run_id],
             policy=self._policy,
         ))
 
     def _match_purchase_order(self, ctx: RunContext) -> StageOutput:
         reference = ctx.invoice.po_reference
+        quoted = self._store.find_purchase_order(reference) if reference else None
         ctx.po_match = rules.match_purchase_order(
             ctx.invoice, ctx.vendor,
-            quoted=self._store.find_purchase_order(reference) if reference else None,
-            open_for_vendor=self._store.purchase_order_balances(ctx.vendor.id, only_open=True),
+            quoted=_without_run(quoted, ctx.run_id) if quoted else None,
+            open_for_vendor=[_without_run(balance, ctx.run_id)
+                             for balance in self._store.purchase_order_balances(ctx.vendor.id, only_open=True)],
             policy=self._policy,
         )
         details = {
@@ -309,6 +365,27 @@ class InvoicePipeline:
         )
 
 
+def _without_run(balance: PoBalance, run_id: int) -> PoBalance:
+    """The PO as it stood before this run, so a run repeated after a restart doesn't bill against itself."""
+    return PoBalance(po=balance.po, invoices=[entry for entry in balance.invoices if entry.run_id != run_id])
+
+
+def _message_finding(message: dict[str, Any]) -> Finding:
+    who = "the vendor" if message["kind"] == "vendor" else "the PO owner"
+    address = message["to_address"] or "no address"
+    if message["status"] == "sent":
+        how = "Replied in the vendor's email thread" if message["in_reply_to"] else "Sent"
+        return Finding(code="EMAIL_SENT", status=Status.PASS, title=f"Emailed {who}",
+                       message=f"{how} to {address}: “{message['subject']}”.")
+    if message["status"] == "held":
+        return Finding(code="EMAIL_HELD", status=Status.NOTE, title=f"Didn't email {who}", message=message["reason"])
+    if message["status"] == "failed":
+        return Finding(code="EMAIL_FAILED", status=Status.NOTE, title=f"Email to {who} didn't go",
+                       message=f"{message['reason']} It can be sent again from this page.")
+    return Finding(code="EMAIL_DRAFT", status=Status.NOTE, title=f"Draft ready for {who}",
+                   message=message["reason"] or f"Addressed to {address}.")
+
+
 def _from_findings(findings: list[Finding], details: dict[str, Any] | None = None) -> StageOutput:
     summary = " ".join(f"{finding.title}." for finding in findings)
     return StageOutput(summary=summary, findings=findings, details=details or {})
@@ -329,11 +406,14 @@ def resolve_review(store: Store, run_id: int, approve: bool, note: str = "") -> 
         if run["total"] is None or not run["invoice_number"] or not run["invoice_date"]:
             raise ResolutionError("Key details couldn't be read, so there is nothing reliable to record. "
                                   "Key the invoice in by hand instead.")
-        store.record_invoice(LedgerEntry(
+        recorded = store.record_invoice(LedgerEntry(
             vendor_id=run["vendor_id"], invoice_number=run["invoice_number"], invoice_date=run["invoice_date"],
             pre_tax=run["pre_tax"] if run["pre_tax"] is not None else run["total"], total=run["total"],
             po_number=run["po_number"], posted_at=utc_now(), recorded_by="reviewer", run_id=run_id,
         ))
+        if not recorded:
+            raise ResolutionError(f"Invoice {run['invoice_number']} is already recorded, so approving this copy "
+                                  "would pay it twice. Reject this one.")
 
     store.update_run(
         run_id, resolution="approved" if approve else "rejected",

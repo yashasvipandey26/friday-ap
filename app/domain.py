@@ -53,6 +53,7 @@ class LineItem(BaseModel):
 class ExtractedInvoice(BaseModel):
     """What the reader found printed on the document. None means 'not on the page'."""
 
+    is_invoice: bool = True  # False for a PO copy, delivery note, statement or anything else attached to an email
     vendor_name: str | None = None
     vendor_tax_id: str | None = None
     invoice_number: str | None = None
@@ -71,6 +72,7 @@ class ExtractedInvoice(BaseModel):
     document_quality: Literal["clear", "degraded", "poor"] = "clear"
     uncertain_fields: list[str] = Field(default_factory=list)
     notes: str | None = None
+    read_by: str | None = None  # which model did the reading; set by the reader, not part of the AI's answer
 
     _text = field_validator(
         "vendor_name", "vendor_tax_id", "invoice_number", "invoice_date", "currency",
@@ -110,6 +112,8 @@ class PurchaseOrder(BaseModel):
     status: Literal["open", "closed"] = "open"
     order_date: str
     lines: list[LineItem] = Field(default_factory=list)
+    owner_name: str = ""  # who raised the PO, and so who is asked when an invoice doesn't fit it
+    owner_email: str = ""
 
 
 class LedgerEntry(BaseModel):

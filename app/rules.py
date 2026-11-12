@@ -113,7 +113,18 @@ def _alnum(text: str | None) -> str:
 
 
 def validate_invoice(invoice: ExtractedInvoice, today: date, policy: Policy) -> list[Finding]:
-    missing = [_FIELD_LABELS[name] for name in _REQUIRED_FIELDS if getattr(invoice, name) is None]
+    if not invoice.is_invoice:
+        # Emails carry purchase order copies, delivery notes and brochures as well as invoices. Telling the
+        # vendor their "invoice" is incomplete would be wrong, so nobody is notified; a person glances at it.
+        return [Finding(
+            code="NOT_AN_INVOICE", status=Status.REVIEW, title="Doesn't look like an invoice", halts=True,
+            message="This document isn't a bill asking to be paid (it may be a PO copy, delivery note, quotation "
+                    "or statement), so it wasn't checked as one."
+                    + (f" The reader noted: {invoice.notes}" if invoice.notes else ""),
+            action="If it really is an invoice, process it by hand. Otherwise reject it; nothing is sent to anyone.",
+        )]
+
+    missing =[_FIELD_LABELS[name] for name in _REQUIRED_FIELDS if getattr(invoice, name) is None]
     if missing and invoice.document_quality == "poor":
         return [Finding(
             code="UNREADABLE", status=Status.REVIEW, title="Too hard to read", halts=True,

@@ -51,6 +51,8 @@
       "tax_rate_percent": 18,
       "status": "closed",
       "order_date": "2026-09-25",
+      "owner_name": "Meera Iyer, Admin",
+      "owner_email": "meera.iyer@meridianretail.example",
       "lines": [
         {"description": "Stationery and pantry consumables for October, as per list", "quantity": 1, "unit_price": 55000, "amount": 55000}
       ]
@@ -64,6 +66,8 @@
       "tax_rate_percent": 18,
       "status": "open",
       "order_date": "2026-07-20",
+      "owner_name": "Arjun Mehta, IT",
+      "owner_email": "arjun.mehta@meridianretail.example",
       "lines": [
         {"description": "Milestone 1: discovery and solution design", "quantity": 1, "unit_price": 300000, "amount": 300000},
         {"description": "Milestone 2: build and integration", "quantity": 1, "unit_price": 360000, "amount": 360000},
@@ -79,6 +83,8 @@
       "tax_rate_percent": 18,
       "status": "open",
       "order_date": "2026-10-12",
+      "owner_name": "Meera Iyer, Admin",
+      "owner_email": "meera.iyer@meridianretail.example",
       "lines": [
         {"description": "Ergonomic office chair, mesh back", "quantity": 40, "unit_price": 4500, "amount": 180000},
         {"description": "Height-adjustable desk, 1500 mm", "quantity": 6, "unit_price": 10000, "amount": 60000}
@@ -93,6 +99,8 @@
       "tax_rate_percent": 18,
       "status": "open",
       "order_date": "2026-10-08",
+      "owner_name": "Kavya Rao, Marketing",
+      "owner_email": "kavya.rao@meridianretail.example",
       "lines": [
         {"description": "Visiting cards, 300 gsm matt, 20 sets of 200", "quantity": 20, "unit_price": 650, "amount": 13000},
         {"description": "Letterheads, 100 gsm bond, A4", "quantity": 2000, "unit_price": 10.75, "amount": 21500}
@@ -107,6 +115,8 @@
       "tax_rate_percent": 18,
       "status": "open",
       "order_date": "2026-10-01",
+      "owner_name": "Rohit Sinha, Supply chain",
+      "owner_email": "rohit.sinha@meridianretail.example",
       "lines": [
         {"description": "Full truck load, 32 ft container, Gurugram to Bengaluru", "quantity": 5, "unit_price": 28000, "amount": 140000},
         {"description": "Loading and unloading charges", "quantity": 1, "unit_price": 10000, "amount": 10000}
@@ -121,6 +131,8 @@
       "tax_rate_percent": 18,
       "status": "open",
       "order_date": "2026-10-21",
+      "owner_name": "Kavya Rao, Marketing",
+      "owner_email": "kavya.rao@meridianretail.example",
       "lines": [
         {"description": "A4 tri-fold brochure, 130 gsm art paper, four colour printing", "quantity": 5000, "unit_price": 17.2, "amount": 86000}
       ]

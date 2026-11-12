@@ -11,8 +11,8 @@ import pytest
 from google.genai import errors as genai_errors
 
 from app.ai import (
-    AiExplainer, AiInvoiceReader, ClaudeModel, Document, GeminiModel, ReaderError, UnconfiguredReader,
-    _INVOICE_SCHEMA, build_ai,
+    AiExplainer, AiInvoiceReader, ClaudeModel, Document, FallbackModel, GeminiModel, ModelBusy, ModelReply,
+    ReaderError, UnconfiguredReader, _INVOICE_SCHEMA, build_ai,
 )
 from app.config import DEFAULT_MODELS, load_settings
 from app.domain import Decision, Outcome
@@ -57,7 +57,7 @@ def gemini_reader(client) -> AiInvoiceReader:
 
 
 READ = dict(
-    vendor_name="Sahyadri Print Works", vendor_tax_id="27ABXFS6640K1Z2", invoice_number="SPW/1047",
+    is_invoice=True, vendor_name="Sahyadri Print Works", vendor_tax_id="27ABXFS6640K1Z2", invoice_number="SPW/1047",
     invoice_date="2026-11-03", currency="INR", po_reference="", po_hint="As per your order dt. 21-10-2026",
     line_items=[dict(description="Brochures", quantity=5000, unit_price=None, amount=101480)],
     subtotal=None, tax_amount=None, tax_rate_percent=18, tax_treatment="Embedded", total=101480,
@@ -207,3 +207,64 @@ def test_a_google_key_builds_a_gemini_reader():
 
     assert isinstance(reader, AiInvoiceReader) and isinstance(reader._model, GeminiModel)
     assert isinstance(explainer, AiExplainer)
+
+
+# --------------------------------------------------------------------------- the backup model
+
+
+class Scripted:
+    """A JsonModel that fails or answers as told."""
+
+    def __init__(self, name, error=None, reply=None):
+        self.name, self._error, self._reply, self.calls = name, error, reply, 0
+
+    def ask(self, **request):
+        self.calls += 1
+        if self._error:
+            raise self._error
+        return ModelReply(self._reply, self.name)
+
+
+def test_a_busy_model_hands_the_invoice_to_the_backup_and_says_which_one_read_it():
+    backup = Scripted("gemini-3.5-flash-lite", reply=READ)
+    model = FallbackModel(Scripted("gemini-3.6-flash", error=ModelBusy("503 high demand")), backup)
+
+    invoice = AiInvoiceReader(model).read(PDF)
+
+    assert invoice.read_by == "gemini-3.5-flash-lite" and backup.calls == 1
+
+
+def test_a_problem_the_backup_would_share_is_not_retried_on_it():
+    backup = Scripted("gemini-3.5-flash-lite", reply=READ)
+    model = FallbackModel(Scripted("gemini-3.6-flash", error=ReaderError("The AI service rejected the API key.")), backup)
+
+    with pytest.raises(ReaderError, match="API key"):
+        AiInvoiceReader(model).read(PDF)
+    assert backup.calls == 0
+
+
+def test_when_both_models_are_busy_the_error_names_both():
+    model = FallbackModel(Scripted("a", error=ModelBusy("a is busy.")), Scripted("b", error=ModelBusy("b is busy.")))
+
+    with pytest.raises(ReaderError, match="a is busy. The backup model, b, failed too"):
+        AiInvoiceReader(model).read(PDF)
+
+
+def test_a_503_from_gemini_counts_as_busy():
+    error = genai_errors.ServerError(503, {"error": {"message": "This model is currently experiencing high demand.",
+                                                     "status": "UNAVAILABLE"}})
+    with pytest.raises(ModelBusy):
+        gemini_reader(FakeGeminiClient(error=error)).read(PDF)
+
+
+def test_the_reader_is_asked_whether_the_document_is_an_invoice_at_all():
+    assert _INVOICE_SCHEMA["properties"]["is_invoice"]["type"] == "boolean"
+    assert "is_invoice" in _INVOICE_SCHEMA["required"]
+
+
+def test_a_backup_model_is_wired_in_only_when_it_differs():
+    reader, _ = build_ai("gemini", "g-key", "gemini-3.6-flash", "Meridian Retail", fallback_model="gemini-3.5-flash-lite")
+    same, _ = build_ai("gemini", "g-key", "gemini-3.6-flash", "Meridian Retail", fallback_model="gemini-3.6-flash")
+
+    assert isinstance(reader._model, FallbackModel)
+    assert isinstance(same._model, GeminiModel)

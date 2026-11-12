@@ -1,7 +1,8 @@
-"""The web layer: a handful of JSON endpoints and the static front end.
+"""The web layer: a handful of JSON endpoints, the static front end, and the inbox watcher.
 
-`create_app` takes its AI components as arguments, so tests run the real pipeline
-with a stub reader and never call a model. Start it with:
+`create_app` takes its outside-world components as arguments (AI reader and writer, mailer, file
+store), so tests run the real pipeline against stubs and never call a model or a mail server.
+Start it with:
 
     uvicorn app.main:create_app --factory
 """
@@ -9,31 +10,34 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from statistics import median
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .ai import API_KEY_NAMES, Explainer, InvoiceReader, build_ai
 from .config import Settings, load_settings
+from .db import open_database
+from .files import FileStore, FileStoreError, LocalFileStore, SupabaseFileStore, identify_file
+from .intake import EmailIntake
+from .mail import InboxWatcher, Mailer
+from .outbox import Outbox
 from .pipeline import InvoicePipeline, ResolutionError, resolve_review
 from .rules import mask_account
 from .store import Store
+from .worker import RunQueue
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
-# Decide the file type from its first bytes; a file name or browser-supplied type can say anything.
-_FILE_SIGNATURES = {
-    b"%PDF": ("application/pdf", ".pdf"),
-    b"\x89PNG": ("image/png", ".png"),
-    b"\xff\xd8\xff": ("image/jpeg", ".jpg"),
-}
+# The outcome a run ends with when it couldn't be read; only those are worth running again.
+_RETRYABLE_CODES = {"READ_FAILED", "STEP_FAILED"}
 
 
 class Resolution(BaseModel):
@@ -49,18 +53,54 @@ def create_app(
     settings: Settings | None = None,
     reader: InvoiceReader | None = None,
     explainer: Explainer | None = None,
+    mailer: Mailer | None = None,
+    files: FileStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
-    store = Store(settings.database_path, settings.seed_path)
+    database = open_database(settings.database_url, settings.database_path)
+    store = Store(database, settings.seed_path)
     store.initialise()
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
+
+    if files is None:
+        if settings.supabase_url and settings.supabase_service_key:
+            files = SupabaseFileStore(settings.supabase_url, settings.supabase_service_key, settings.storage_bucket)
+            files.ensure_bucket()
+        else:
+            files = LocalFileStore(settings.upload_dir)
+    if mailer is None and settings.mail:
+        mailer = Mailer(settings.mail, f"Accounts Payable, {settings.company_name}")
 
     default_reader, default_explainer = build_ai(
-        settings.provider, settings.api_key, settings.model, settings.company_name, settings.read_effort)
-    pipeline = InvoicePipeline(store, reader or default_reader, explainer or default_explainer, settings)
+        settings.provider, settings.api_key, settings.model, settings.company_name, settings.read_effort,
+        settings.fallback_model)
+    outbox = Outbox(store, mailer, send_mode=settings.mail_send_mode, procurement_email=settings.procurement_email,
+                    company_name=settings.company_name)
+    pipeline = InvoicePipeline(store, reader or default_reader, explainer or default_explainer, settings, files, outbox)
+    queue = RunQueue(pipeline.run, settings.workers)
+    watcher = None
+    if settings.mail and mailer:
+        intake = EmailIntake(store, files, queue, outbox, settings.mail.address, settings.max_upload_bytes)
+        watcher = InboxWatcher(settings.mail, intake.handle)
     samples = {sample["id"]: sample for sample in json.loads((settings.samples_dir / "manifest.json").read_text())}
 
-    app = FastAPI(title="Friday", description="Accounts payable invoice processing, from PDF to decision.")
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        unfinished = store.unfinished_runs()
+        if unfinished:  # the app stopped part-way through these; every step is safe to repeat
+            logger.info("Resuming runs interrupted by a restart: %s", unfinished)
+        for run_id in unfinished:
+            store.update_run(run_id, status="queued", stages=[])
+            queue.submit(run_id)
+        if watcher:
+            watcher.start()
+        yield
+        if watcher:
+            watcher.stop()
+        queue.shutdown()
+        database.close()
+
+    app = FastAPI(title="Friday", description="Accounts payable invoice processing, from email to decision.",
+                  lifespan=lifespan)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -69,8 +109,22 @@ def create_app(
             "provider": settings.provider,
             "key_name": API_KEY_NAMES[settings.provider],
             "model": settings.model,
+            "fallback_model": settings.fallback_model,
             "company": settings.company_name,
             "tolerance_pct": settings.policy.tolerance_pct,
+            "database": database.dialect,
+            "storage": "supabase" if isinstance(files, SupabaseFileStore) else "local",
+            "mail": _mail_status(),
+        }
+
+    def _mail_status() -> dict[str, Any]:
+        return {
+            "enabled": watcher is not None,
+            "address": settings.mail.address if settings.mail else None,
+            "send_mode": settings.mail_send_mode if mailer else "off",
+            "last_checked": watcher.last_checked if watcher else None,
+            "last_error": watcher.last_error if watcher else None,
+            "poll_seconds": settings.mail.poll_seconds if settings.mail else None,
         }
 
     # ------------------------------------------------------------- the inbox of sample invoices
@@ -85,35 +139,50 @@ def create_app(
         return FileResponse(settings.samples_dir / sample["file"], media_type="application/pdf",
                             filename=sample["file"], content_disposition_type="inline")
 
+    # ------------------------------------------------------------- the real mailbox
+
+    @app.get("/api/mailbox")
+    def mailbox() -> dict[str, Any]:
+        return {**_mail_status(), "emails": store.recent_emails()}
+
+    @app.post("/api/mailbox/check", status_code=202)
+    def check_mailbox() -> dict[str, str]:
+        if watcher is None:
+            raise HTTPException(409, "Email isn't set up. Add FRIDAY_MAIL_ADDRESS and FRIDAY_MAIL_APP_PASSWORD.")
+        watcher.check_soon()
+        return {"status": "checking"}
+
     # ------------------------------------------------------------- runs
 
     @app.post("/api/runs", status_code=201)
-    async def start_run(
-        background: BackgroundTasks,
-        file: UploadFile | None = File(None),
-        sample_id: str | None = Form(None),
-    ) -> dict[str, int]:
+    async def start_run(file: UploadFile | None = File(None), sample_id: str | None = Form(None)) -> dict[str, int]:
         a_day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="seconds")
         if store.count_runs_since(a_day_ago) >= settings.max_runs_per_day:
             raise HTTPException(429, "This demo has reached its daily limit of invoices. Try again tomorrow.")
 
         if sample_id:
             sample = _require(samples.get(sample_id), "That sample doesn't exist.")
-            filename, data = sample["file"], (settings.samples_dir / sample["file"]).read_bytes()
+            filename, data, source = sample["file"], (settings.samples_dir / sample["file"]).read_bytes(), "sample"
         elif file:
-            filename = Path(file.filename or "invoice").name
+            filename, source = (file.filename or "invoice").rsplit("/", 1)[-1], "upload"
             data = await file.read(settings.max_upload_bytes + 1)
             if len(data) > settings.max_upload_bytes:
                 raise HTTPException(413, f"That file is over {settings.max_upload_bytes // (1024 * 1024)} MB.")
         else:
             raise HTTPException(400, "Attach an invoice file or choose one from the inbox.")
 
-        media_type, extension = _identify_file(data)
-        stored_at = settings.upload_dir / f"{uuid4().hex}{extension}"
-        stored_at.write_bytes(data)
+        file_type = identify_file(data)
+        if file_type is None:
+            raise HTTPException(415, "Friday reads PDF, PNG, JPEG and WebP files. This doesn't look like any of those.")
+        media_type, extension = file_type
+        key = f"runs/{uuid4().hex}{extension}"
+        try:
+            files.save(key, data, media_type)
+        except FileStoreError as error:
+            raise HTTPException(502, str(error)) from error
 
-        run_id = store.create_run(filename, stored_at, media_type)
-        background.add_task(pipeline.run, run_id)  # the response returns now; the page polls for progress
+        run_id = store.create_run(filename, key, media_type, source)
+        queue.submit(run_id)  # the response returns now; the page polls for progress
         return {"id": run_id}
 
     @app.get("/api/runs")
@@ -124,24 +193,58 @@ def create_app(
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: int) -> dict[str, Any]:
         run = _require(store.get_run(run_id), "That run doesn't exist.")
-        return _public(run)
+        return _public(store, run)
 
     @app.get("/api/runs/{run_id}/file")
-    def run_file(run_id: int) -> FileResponse:
+    def run_file(run_id: int) -> Response:
+        """The original document, served by the app so it can be shown inside the page."""
         run = _require(store.get_run(run_id), "That run doesn't exist.")
-        path = Path(run["file_path"])
-        if not path.is_file():
-            raise HTTPException(404, "The original file is no longer stored.")
-        return FileResponse(path, media_type=run["media_type"], filename=run["filename"],
-                            content_disposition_type="inline")
+        try:
+            data = files.load(run["file_key"])
+        except FileStoreError as error:
+            raise HTTPException(404, str(error)) from error
+        return Response(data, media_type=run["media_type"], headers={
+            "Content-Disposition": f'inline; filename="{_ascii(run["filename"])}"', "Cache-Control": "private, max-age=3600"})
+
+    @app.get("/api/runs/{run_id}/stored")
+    def stored_file(run_id: int) -> Response:
+        """A short-lived link to the copy in cloud storage, or the file itself when it is stored locally."""
+        run = _require(store.get_run(run_id), "That run doesn't exist.")
+        try:
+            link = files.link(run["file_key"])
+        except FileStoreError as error:
+            raise HTTPException(502, str(error)) from error
+        return RedirectResponse(link) if link else run_file(run_id)
 
     @app.post("/api/runs/{run_id}/resolve")
     def resolve(run_id: int, resolution: Resolution) -> dict[str, Any]:
         try:
-            return _public(resolve_review(store, run_id, resolution.approve, resolution.note))
+            return _public(store, resolve_review(store, run_id, resolution.approve, resolution.note))
         except LookupError as error:
             raise HTTPException(404, str(error)) from error
         except ResolutionError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.post("/api/runs/{run_id}/retry", status_code=201)
+    def retry(run_id: int) -> dict[str, int]:
+        """Run the same document again as a new run, after an outage stopped the first one."""
+        run = _require(store.get_run(run_id), "That run doesn't exist.")
+        primary = (run["decision"] or {}).get("primary_code")
+        if run["status"] != "failed" and primary not in _RETRYABLE_CODES:
+            raise HTTPException(409, "Only runs stopped by an outage or an error can be run again.")
+        new_id = store.create_run(run["filename"], run["file_key"], run["media_type"], run["source"], run["email_id"])
+        store.update_run(run_id, resolution="closed", resolution_note=f"Run again as #{new_id}.",
+                         resolved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        queue.submit(new_id)
+        return {"id": new_id}
+
+    @app.post("/api/messages/{message_id}/send")
+    def send_message(message_id: int) -> dict[str, Any]:
+        try:
+            return outbox.send(message_id)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        except ValueError as error:
             raise HTTPException(409, str(error)) from error
 
     # ------------------------------------------------------------- what the rules check against
@@ -193,19 +296,21 @@ def _require(value: Any, message: str) -> Any:
     return value
 
 
-def _identify_file(data: bytes) -> tuple[str, str]:
-    for signature, file_type in _FILE_SIGNATURES.items():
-        if data.startswith(signature):
-            return file_type
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp", ".webp"
-    raise HTTPException(415, "Friday reads PDF, PNG, JPEG and WebP files. This doesn't look like any of those.")
+def _ascii(filename: str) -> str:
+    return filename.encode("ascii", "replace").decode().replace('"', "'")
 
 
-def _public(run: dict[str, Any]) -> dict[str, Any]:
-    """The run as the browser sees it: no server paths, plus a link to the original document."""
-    visible = {key: value for key, value in run.items() if key not in ("file_path", "invoice_key")}
-    return {**visible, "file_url": f"/api/runs/{run['id']}/file"}
+def _public(store: Store, run: dict[str, Any]) -> dict[str, Any]:
+    """The run as the browser sees it: no storage keys, plus where it came from and what was sent."""
+    visible = {key: value for key, value in run.items() if key not in ("file_key", "invoice_key")}
+    email = store.get_email(run["email_id"]) if run["email_id"] else None
+    return {
+        **visible,
+        "file_url": f"/api/runs/{run['id']}/file",
+        "stored_url": f"/api/runs/{run['id']}/stored",
+        "email": {key: email[key] for key in ("from_address", "from_name", "subject", "received_at")} if email else None,
+        "messages": store.messages_for_run(run["id"]),
+    }
 
 
 def _summarise(runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -220,5 +325,5 @@ def _summarise(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "rejected": sum(run["outcome"] == "rejected" or run["resolution"] == "rejected" for run in finished),
         "approved_value": sum(run["total"] or 0 for run in untouched + approved_by_person),
         "median_seconds": round(median(durations) / 1000, 1) if durations else None,
+        "by_email": sum(run["source"] == "email" for run in runs),
     }
-
