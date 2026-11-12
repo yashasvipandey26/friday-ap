@@ -184,3 +184,27 @@ def test_an_encoded_password_and_options_are_understood():
     params = connection_params("postgresql://me:p%40ss@127.0.0.1:5544/postgres?sslmode=disable")
 
     assert params["password"] == "p@ss" and params["port"] == 5544 and params["sslmode"] == "disable"
+
+
+@pytest.mark.parametrize("server_said, expected", [
+    ('FATAL:  password authentication failed for user "postgres"', "rejected the password"),
+    ("FATAL:  Tenant or user not found", "postgres.<project-ref>"),
+    ('failed to resolve host "aws-9-nowhere.pooler.supabase.com"', "doesn't exist"),
+    ("connection timeout expired", "didn't answer"),
+])
+def test_a_database_that_wont_connect_says_why_without_the_password(server_said, expected):
+    from app.db import connection_params, explain_connection_error
+
+    params = connection_params("postgresql://postgres.abcref:s3cret#!@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres")
+    message = explain_connection_error(Exception(server_said + " (password s3cret#!)"), params)
+
+    assert expected in message and "s3cret" not in message
+    assert "postgres.abcref" in message and "aws-1-ap-southeast-2" in message
+
+
+def test_the_direct_supabase_address_is_called_out_by_name():
+    from app.db import connection_params, explain_connection_error
+
+    params = connection_params("postgresql://postgres:pw@db.abcref.supabase.co:5432/postgres")
+
+    assert "IPv6" in explain_connection_error(Exception("Network is unreachable"), params)

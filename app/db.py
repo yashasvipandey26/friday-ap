@@ -114,6 +114,34 @@ def connection_params(url: str) -> dict[str, Any]:
     return {key: value for key, value in params.items() if value not in ("", None)}
 
 
+def explain_connection_error(error: Exception, params: dict[str, Any]) -> str:
+    """Say what is wrong with DATABASE_URL in plain words. The password never appears in the result."""
+    detail = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
+    if params.get("password"):
+        detail = detail.replace(params["password"], "***")
+    host, user = params.get("host", "?"), params.get("user", "?")
+    where = f"host {host}, user {user}"
+    lowered = detail.lower()
+    if "password authentication failed" in lowered:
+        reason = ("The database rejected the password. If you reset it in Supabase, put the new one in "
+                  "DATABASE_URL everywhere it is set (your .env and Render).")
+    elif "tenant or user not found" in lowered:
+        reason = ("Supabase's pooler doesn't know this user. For the Session pooler the user must be "
+                  "postgres.<project-ref>, exactly as Supabase > Connect > Session pooler shows it.")
+    elif any(text in lowered for text in ("could not translate host", "name or service not known",
+                                           "nodename nor servname", "failed to resolve")):
+        reason = "The host name in DATABASE_URL doesn't exist. Copy the string again from Supabase > Connect."
+    elif host.startswith("db.") and host.endswith(".supabase.co"):
+        reason = ("This is Supabase's direct connection, which only works over IPv6, and most hosts (Render "
+                  "included) can't reach it. Use the Session pooler string from Supabase > Connect instead.")
+    elif "timeout" in lowered or "timed out" in lowered or "unreachable" in lowered or "refused" in lowered:
+        reason = ("The database didn't answer. Check that the Supabase project isn't paused and that this is "
+                  "the Session pooler string.")
+    else:
+        reason = "Check DATABASE_URL."
+    return f"Couldn't connect to the database ({where}): {reason} The server said: {detail}"
+
+
 def _postgres_sql(sql: str) -> str:
     # psycopg uses %s placeholders, so any literal % must be doubled first.
     return sql.replace("%", "%%").replace("?", "%s")
@@ -139,20 +167,24 @@ class PostgresDatabase:
     dialect = "postgres"
 
     def __init__(self, url: str) -> None:
+        import psycopg
         from psycopg.rows import dict_row
         from psycopg_pool import ConnectionPool
+
+        params = {**connection_params(url), "connect_timeout": 10}
+        # One plain connection first: a pool retries quietly and only ever reports "timed out", which
+        # hides whether the password, the user or the address is wrong.
+        try:
+            psycopg.connect(**params).close()
+        except psycopg.Error as error:
+            raise ConnectionError(explain_connection_error(error, params)) from None
 
         # prepare_threshold=None: Supabase's pooler in transaction mode can't keep prepared statements.
         self._pool = ConnectionPool(
             "", min_size=1, max_size=6, open=False, timeout=20,
-            kwargs={**connection_params(url), "row_factory": dict_row, "prepare_threshold": None},
+            kwargs={**params, "row_factory": dict_row, "prepare_threshold": None},
         )
-        try:
-            self._pool.open(wait=True, timeout=20)
-        except Exception as error:
-            self._pool.close()
-            raise ConnectionError(f"Couldn't connect to the database in DATABASE_URL ({type(error).__name__}). "
-                                  "Check the host, the password and that it is the Session pooler string.") from None
+        self._pool.open(wait=True, timeout=20)
 
     @contextmanager
     def transaction(self) -> Iterator[Transaction]:

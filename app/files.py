@@ -108,11 +108,16 @@ _FILE_SIGNATURES = {
 }
 
 
+_HEIC_BRANDS = (b"heic", b"heix", b"hevc", b"heim", b"heis", b"mif1", b"msf1")
+
+
 def identify_file(data: bytes) -> tuple[str, str] | None:
-    """(media type, extension) for a PDF, PNG, JPEG or WebP; None for anything else."""
+    """(media type, extension) for a PDF, PNG, JPEG, WebP or HEIC; None for anything else."""
     for signature, file_type in _FILE_SIGNATURES.items():
         if data.startswith(signature):
             return file_type
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp", ".webp"
+    if data[4:8] == b"ftyp" and data[8:12] in _HEIC_BRANDS:  # iPhone photos
+        return "image/heic", ".heic"
     return None

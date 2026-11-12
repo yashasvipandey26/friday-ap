@@ -116,9 +116,12 @@ def _attachments(message: EmailMessage) -> list[Attachment]:
         if part.is_multipart():
             continue
         content_type = part.get_content_type()
-        is_document = content_type == "application/pdf" or content_type == "application/octet-stream"
         is_image = content_type.startswith("image/")
-        if not (is_document or is_image) or (part.get_content_disposition() is None and not part.get_filename()):
+        # Mail programs label PDFs all sorts of ways (application/x-pdf, octet-stream, force-download), so
+        # anything attached is kept and its first bytes decide later. Only the message text itself is skipped.
+        if content_type.startswith(("text/", "multipart/", "message/")):
+            continue
+        if part.get_content_disposition() is None and not part.get_filename():
             continue
         data = part.get_payload(decode=True) or b""
         if is_image and len(data) < _MIN_IMAGE_BYTES:

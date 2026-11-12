@@ -48,7 +48,7 @@ class EmailIntake:
         for attachment in email.attachments:
             file_type = identify_file(attachment.data)
             if file_type is None:
-                skipped.append(f"{attachment.filename} (not a PDF or image)")
+                skipped.append(f"{attachment.filename} (not a PDF or a photo)")
                 continue
             if len(attachment.data) > self._max_bytes:
                 skipped.append(f"{attachment.filename} (over {self._max_bytes // (1024 * 1024)} MB)")

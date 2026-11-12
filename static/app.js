@@ -123,13 +123,13 @@ async function showInbox(view) {
   state.cameFrom = "inbox";
   const samples = await api("/api/samples");
 
-  const picker = el("input", { type: "file", id: "invoice-file", accept: ".pdf,.png,.jpg,.jpeg,.webp", class: "visually-hidden",
+  const picker = el("input", { type: "file", id: "invoice-file", accept: ".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif", class: "visually-hidden",
     onchange: (event) => event.target.files[0] && startRun({ file: event.target.files[0] }) });
   const dropzone = el("div", { class: "dropzone" },
     el("p", { class: "dropzone-title" }, "Drop a PDF or a photo of an invoice here"),
     el("label", { class: "button", for: "invoice-file" }, "Choose a file"),
     picker,
-    el("p", { class: "fine-print" }, "PDF, PNG, JPEG or WebP, up to 8 MB. Scans are fine."));
+    el("p", { class: "fine-print" }, "A PDF or a photo (JPEG, PNG, WebP or iPhone HEIC), up to 8 MB. Scans are fine."));
   for (const type of ["dragenter", "dragover"]) {
     dropzone.addEventListener(type, (event) => { event.preventDefault(); dropzone.classList.add("is-over"); });
   }

@@ -25,6 +25,7 @@ from .ai import API_KEY_NAMES, Explainer, InvoiceReader, build_ai
 from .config import Settings, load_settings
 from .db import open_database
 from .files import FileStore, FileStoreError, LocalFileStore, SupabaseFileStore, identify_file
+from .images import ImageError, prepare_image
 from .intake import EmailIntake
 from .mail import InboxWatcher, Mailer
 from .outbox import Outbox
@@ -173,7 +174,7 @@ def create_app(
 
         file_type = identify_file(data)
         if file_type is None:
-            raise HTTPException(415, "Matchbook reads PDF, PNG, JPEG and WebP files. This doesn't look like any of those.")
+            raise HTTPException(415, "Matchbook reads PDFs and photos (JPEG, PNG, WebP, HEIC). This doesn't look like any of those.")
         media_type, extension = file_type
         key = f"runs/{uuid4().hex}{extension}"
         try:
@@ -203,7 +204,14 @@ def create_app(
             data = files.load(run["file_key"])
         except FileStoreError as error:
             raise HTTPException(404, str(error)) from error
-        return Response(data, media_type=run["media_type"], headers={
+        media_type = run["media_type"]
+        if media_type == "image/heic":  # most browsers can't show HEIC, so they get a JPEG copy to look at
+            try:
+                prepared = prepare_image(data, media_type)
+                data, media_type = prepared.data, prepared.media_type
+            except ImageError:
+                pass
+        return Response(data, media_type=media_type, headers={
             "Content-Disposition": f'inline; filename="{_ascii(run["filename"])}"', "Cache-Control": "private, max-age=3600"})
 
     @app.get("/api/runs/{run_id}/stored")

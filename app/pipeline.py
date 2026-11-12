@@ -34,6 +34,7 @@ from .domain import (
     reference_key,
 )
 from .files import FileStore
+from .images import ImageError, prepare_image
 from .outbox import Outbox
 from .rules import PoMatch, format_money
 from .store import Store, utc_now
@@ -245,12 +246,14 @@ class InvoicePipeline:
     def _receive(self, ctx: RunContext) -> StageOutput:
         data = self._files.load(ctx.file_key)
         size = f"{len(data) / 1024:.0f} KB"
-        pages, kind = 1, "image"
+        pages, kind, media_type, changes = 1, "image", ctx.media_type, []
 
         if ctx.media_type == "application/pdf":
             try:
                 pdf = PdfReader(io.BytesIO(data))
-                if pdf.is_encrypted:
+                # Many PDFs are "encrypted" only against editing and open without a password, as most
+                # bank and utility invoices do. Only a PDF that really needs a password is refused.
+                if pdf.is_encrypted and not pdf.decrypt(""):
                     raise ValueError("password-protected")
                 pages = len(pdf.pages)
                 text = "".join(page.extract_text() or "" for page in pdf.pages[:3])
@@ -261,6 +264,16 @@ class InvoicePipeline:
                     action="Ask the vendor to send the invoice again as a normal PDF.", notify="vendor",
                 )])
             kind = "text_pdf" if len(text.strip()) >= 40 else "scanned_pdf"
+        else:
+            try:
+                prepared = prepare_image(data, ctx.media_type)
+            except ImageError as error:
+                return StageOutput(summary="The image can't be opened.", findings=[Finding(
+                    code="FILE_UNREADABLE", status=Status.REJECT, title="File can't be opened", halts=True,
+                    message=f"{error} There is nothing to read.",
+                    action="Ask the vendor to send the invoice again as a PDF or a clear photo.", notify="vendor",
+                )])
+            data, media_type, changes = prepared.data, prepared.media_type, prepared.changes
 
         if pages > self._settings.max_pages:
             return StageOutput(summary=f"{pages} pages is too long for a single invoice.", findings=[Finding(
@@ -269,14 +282,14 @@ class InvoicePipeline:
                 action="Split the file into separate invoices and submit them one at a time.",
             )])
 
-        ctx.document = Document(filename=ctx.filename, media_type=ctx.media_type, data=data, kind=kind, pages=pages)
+        ctx.document = Document(filename=ctx.filename, media_type=media_type, data=data, kind=kind, pages=pages)
         page_count = f"{pages} page{'s' if pages != 1 else ''}"
         summary = {
             "text_pdf": f"Digital PDF, {page_count}, {size}.",
             "scanned_pdf": f"Scanned PDF, {page_count}, {size}. It has no text layer, so it will be read as an image.",
-            "image": f"Image file, {size}. It will be read as an image.",
+            "image": f"Photo or image, {size}." + (f" Before reading it was {_join_words(changes)}." if changes else ""),
         }[kind]
-        return StageOutput(summary=summary, details={"kind": kind, "pages": pages, "bytes": len(data)})
+        return StageOutput(summary=summary, details={"kind": kind, "pages": pages, "bytes": len(data), "prepared": changes})
 
     def _read(self, ctx: RunContext) -> StageOutput:
         try:
@@ -363,6 +376,10 @@ class InvoicePipeline:
             invoice_date=ctx.invoice.invoice_date, pre_tax=self._pre_tax(ctx), total=ctx.invoice.total,
             po_number=self._po_number(ctx), posted_at=utc_now(), recorded_by="matchbook", run_id=ctx.run_id,
         )
+
+
+def _join_words(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def _without_run(balance: PoBalance, run_id: int) -> PoBalance:
